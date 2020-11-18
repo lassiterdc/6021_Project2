@@ -1,0 +1,48 @@
+---
+title: "DCL_Project_2"
+author: "Daniel Lassiter"
+date: "11/18/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
+datadir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Data/Spam"
+
+setwd(sourcedir)
+
+source("SPM_Panel.R")
+source("PCAplots.R")
+source("FactorPlots.R")
+source("pc.glm.R")
+source("ROC.R")
+source("TestSet.R")
+
+library(ggplot2)
+library(ggpubr)
+library(ggbiplot)
+library(ggfortify)
+library(ggResidpanel)
+library(MASS)
+library(forecast)
+library(tidyverse)
+library(lubridate)
+library(mtsdi)
+library("car")
+library(tseries)
+library(MTS)
+
+```
+
+
+
+```{r}
+
+```
+
