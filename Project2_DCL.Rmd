@@ -1,0 +1,104 @@
+---
+title: "Project 2"
+author: "Group Members' Names"
+date: "Date"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+opts_knit$set(root.dir = sourcedir)
+
+library(forecast)
+library(imputeTS)
+library(ggplot2)
+library(ggpubr)
+library(ggbiplot)
+library(ggfortify)
+library(ggResidpanel)
+library(MASS)
+library(forecast)
+library(tidyverse)
+library(lubridate)
+library(mtsdi)
+library("car")
+library(tseries)
+library(MTS)
+library(here)
+library(tsibble)
+library(feasts)
+
+sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
+datadir <- paste0(here(), "/")
+
+setwd(sourcedir)
+
+source("SPM_Panel.R")
+source("PCAplots.R")
+source("FactorPlots.R")
+source("pc.glm.R")
+source("ROC.R")
+source("TestSet.R")
+
+
+```
+
+
+# Load data and impute missing values
+```{r}
+setwd(datadir)
+
+airquality = read.csv('AirQualityUCI.csv')
+
+# replace -200 with NA
+airquality[airquality == -200] <- NA
+
+# convert integer type to numeric
+intcols = c(4,5,7,8,9,10,11,12)
+for(i in 1:length(intcols)){
+  airquality[,intcols[i]] <- as.numeric(airquality[,intcols[i]])
+}
+
+setwd(sourcedir)
+
+# create new data frame with just NO2 and impute missing values
+AQdata = airquality["NO2.GT."]
+AQdata = na_interpolation(AQdata)
+
+# aggregate to daily maxima for model building
+dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), 
+                     FUN=max) %>% as_tsibble(index = Group.1) %>%
+          rename("Date" = "Group.1") %>% rename("NO2" = "NO2.GT.")
+
+
+# create time series of NO2
+NO2.ts <- ts(dailyAQ[,2])
+```
+
+```{r}
+dailyAQ %>% autoplot(NO2) + ylab("NO2 (mg/m^3)") + xlab("Date") + 
+  ggtitle("Nitrogen Concentration") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
+        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+
+dailyAQ %>% gg_season(NO2, period = "week") + ylab("NO2 (mg/m^3)") + xlab("") + 
+    ggtitle("Nitrogen Concentration") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
+        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+
+dailyAQ %>% model(STL(NO2)) %>% components() %>% autoplot() + ylab("Mean Flow (cfs)") + 
+  ggtitle("Average Spring Flow: Grand Coulee") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
+        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+
+dailyAQ %>%
+  model(STL(NO2 ~ trend(window=21) + season(window = "periodic"), # + season(window="periodic"), 
+    robust = TRUE)) %>%
+  components() %>%
+  autoplot()
+
+dailyAQ %>% ACF(NO2) %>% autoplot()
+
+dailyAQ %>% PACF(NO2) %>% autoplot()
+
+```
+
