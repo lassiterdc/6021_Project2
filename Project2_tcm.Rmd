@@ -1,0 +1,45 @@
+---
+title: "Project 2"
+author: "Daniel, Tom, and Rachael"
+date: "Date"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
+datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
+opts_knit$set(root.dir = sourcedir)
+library(forecast)
+library(imputeTS)
+```
+
+# Load data and impute missing values
+```{r cars}
+setwd(datadir)
+
+airquality = read.csv('AirQualityUCI.csv')
+
+# replace -200 with NA
+airquality[airquality == -200] <- NA
+
+# convert integer type to numeric
+intcols = c(4,5,7,8,9,10,11,12)
+for(i in 1:length(intcols)){
+  airquality[,intcols[i]] <- as.numeric(airquality[,intcols[i]])
+}
+
+setwd(sourcedir)
+
+# create new data frame with just NO2 and impute missing values
+AQdata = airquality["NO2.GT."]
+AQdata = na_interpolation(AQdata)
+
+# aggregate to daily maxima for model building
+dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=max)
+
+# create time series of NO2
+NO2.ts <- ts(dailyAQ[,2])
+```
