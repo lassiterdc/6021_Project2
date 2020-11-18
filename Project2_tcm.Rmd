@@ -9,8 +9,12 @@ output:
 
 ```{r setup, include=FALSE}
 require("knitr")
-sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
-datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
+#sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
+#datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
+
+datadir <- "C:/Users/tcmuh/Desktop/Fall2020/SYS6021/Data/AirQualityUCI"
+sourcedir <-"C:/Users/tcmuh/Desktop/Fall2020/SYS6021/Source"
+
 opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
