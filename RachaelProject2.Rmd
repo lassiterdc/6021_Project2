@@ -1,6 +1,6 @@
 ---
 title: "Project 2"
-author: "Group Members' Names"
+author: "Daniel, Tom, Rachael"
 date: "Date"
 output:
   pdf_document: default
@@ -9,8 +9,12 @@ output:
 
 ```{r setup, include=FALSE}
 require("knitr")
-sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
-datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
+sourcedir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Source"
+datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Project/6021_Project2/AirQualityUCI"
+
+
+#sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
+#datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
 opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
