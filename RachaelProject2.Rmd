@@ -10,7 +10,7 @@ output:
 ```{r setup, include=FALSE}
 require("knitr")
 sourcedir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Source"
-datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Project/6021_Project2/AirQualityUCI"
+datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Project/6021_Project2/"
 
 
 #sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
@@ -18,6 +18,7 @@ datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS
 opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
+library(ggplot2)
 ```
 
 # Load data and impute missing values
@@ -46,4 +47,122 @@ dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=ma
 
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
+
+# create time series of NO2 without the last 7 days. (I added this)
+dailyAQ.7 <- dailyAQ[1:384,]
+NO2.7.ts <- ts(dailyAQ.7[,2])
 ```
+
+1. Building Univariate Time Series Models: Build a time series model
+of daily maximum nitrogen dioxide (NO2) concentrations using all but
+the last 7 days of observations. Make sure to address the following items:
+(a) How you discovered and modeled any seasonal components, if applicable. (5 points)
+(b) How you discovered and modeled any trends, if applicable. (5 points)
+(c) How you determined autoregressive and moving average components,
+if applicable. (10 points)
+(d) How you assessed alternative models (e.g. adjusted R2, AIC, diagnostics, etc.). Assessments should discuss diagnostics and at least one metric. Show and discuss diagnostics of the residuals’ homoscedasticity, Gaussianity, and independence. What problems, if any, remain in the diagnostics of the selected model? (20 points)
+(e) Forecast the next 7 days of NO2 concentrations using your selected model. Plot the forecasts vs. true values. What is the MSE of the 7-day forecast? (10 points)
+
+2. Simulating Univariate Time Series Models: Simulate a year of synthetic observations of daily maximum nitrogen dioxide (NO2) concentrations from your selected model. Set the seed so you will get the same
+results each time. You will need to consider the sum of the linear models
+of the trend + seasonality, and the residual models. Assess and compare
+the model’s performance with respect to: (50 points)
+(a) Ability to reproduce appearance of time series. Plot observations and
+simulations and visually compare their characteristics. (10 points)
+(b) Ability to reproduce observed trends. You can assess this by building
+a linear model of the trend + seasonality of the simulations and comparing the coefficient estimates with the linear model of the trend +
+seasonality of the observations. What is the percent difference in the
+coefficient on time? (10 points)
+(c) Ability to reproduce seasonality of the time series. Analysis can be
+visual, simply comparing the periodogram of the observations and
+simulations. (10 points)
+(d) Ability to reproduce observed mean and variance of the time series
+(Hint: Use the functions ‘mean(ts)’ and ‘var(ts)’ where ts is a time
+series, and find the percent difference between observations and simulations) (10 points)
+(e) Ability to reproduce the autocorrelation of the time series. Analysis
+can be visual, simply comparing the ACF and PACF of the observations and simulations. (10 points)
+
+```{r}
+# Build a time series model of daily maximum nitrogen dioxide (NO2) concentrations using all but the last 7 days of observations.
+# plot the time series
+autoplot(NO2.7.ts, ylab="Max NO2 Concentration", xlab="Day")
+# seems to be trending upwards and has an increasing variance over time.
+
+acf(NO2.7.ts)
+ggAcf(NO2.7.ts)
+# acf seems to show a decay over time. Each lag in acf and pacf are significant though and never cut off.
+# this tells us that there could be some seasonality maybe?
+
+# Next, model the trend of the concentrations.
+time.no2<-c(1:(length(NO2.7.ts)))
+
+#Build a new model, spam.trend which predicts spam.ts based on the time variable, time.spam
+no27.trend<-lm(NO2.7.ts~time.no2)
+
+##use the summary() command on spam.trend. Is time significant in predicting no2 frequency? yes, it is!
+summary(no27.trend)
+
+plot(NO2.7.ts) #linear model
+abline(no2.7.trend,col='red')
+# Seems to be an upward trend over time
+
+# Get the periodogram for NO2.7.ts
+pg.no27 <- spec.pgram(NO2.7.ts,spans=9,demean=T,log='no')
+#spans is ban width, demean is subtract the mean, and log means
+# no log transform on the y-axis
+#for plotting in ggplot below
+spec.no27 <- data.frame(freq=pg.no27$freq, spec=pg.no27$spec)
+ggplot(spec.no27) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of NO2 Concenctrations")
+
+# There is clearly a peak at the beginning
+# Where is the peak?
+max.omega.no27<-pg.no27$freq[which(pg.no27$spec==max(pg.no27$spec))]
+
+# Where is the peak?
+max.omega.no27
+# 0.005208333
+# What is the period?
+1/max.omega.no27
+# period of 192
+```
+```{r}
+#*****************************
+# 
+# Model Trend and Seasonality  
+# 
+#*****************************
+no27.trend<-lm(NO2.7.ts ~ time.no2)
+
+# Use the summary() command on temp.trend,
+# Is time significant in predicting Richmond minimum temperature?
+summary(no27.trend)
+# temp coefficeient is not statistically significant, 
+#intercept would be the average at time =0
+# no, this isn't good enough to see a tredn though
+# because we need to account for seasonality
+
+# Plot temp.trend model
+ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() +
+  stat_smooth(method="lm",col="red") + xlab("") + ylab("Richmond Tmin")
+
+# Model diagnostics for temp.trend
+autoplot(no2.7.trend, labels.id = NULL)
+    
+# Are there any issue with the diagnostic plots for the temp.trend model?
+
+# Model seasonality
+no27.trend.seasonal <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/12) + cos(2*pi*time.no2/12))
+summary(no27.trend.seasonal)
+# now we know temperature (t) is significant and it is positive
+# Plot temp.trend.seasonal model
+ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
+  geom_line(aes(x=Group.1,y=no27.trend.seasonal$fitted.values),color="red") 
+
+# Model diagnostics for temp.trend.seasonal
+autoplot(no27.trend.seasonal, labels.id = NULL)
+#168 TS2
+
+#lung box, assumptions of independent residuals, then suggest more terms than 6 lags ago to capture correlation or maybe there's a missing moving average
+```
+
