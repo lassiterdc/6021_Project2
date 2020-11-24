@@ -18,10 +18,17 @@ sourcedir <-"C:/Users/tcmuh/Desktop/Fall2020/SYS6021/Source"
 opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
+library(mtsdi)
+library(ggplot2)
+library(lubridate)
+library(tidyverse)
+library(ggfortify)
+library(ggpubr)
+library(tseries)
 ```
 
 # Load data and impute missing values
-```{r cars}
+```{r cars, warning=FALSE}
 setwd(datadir)
 
 airquality = read.csv('AirQualityUCI.csv')
@@ -47,3 +54,149 @@ dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=ma
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
 ```
+
+First need to visualize the data:
+
+```{r}
+
+AQdata.ts <- ts(AQdata)
+autoplot(AQdata.ts)
+
+dailyAQ.train <- dailyAQ[1:(dim(dailyAQ)[1]-7),]
+
+dailyAQ.ts <- ts(dailyAQ.train$NO2.GT.)
+autoplot(dailyAQ.ts)
+
+```
+
+
+
+```{r}
+
+spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
+
+
+```
+
+From PG highest peak at 192 days, next one may be about 7 days.
+
+Also looks like it may have a constant mean for the first 180-200 days and then an increasing trend.
+
+Next step is to look at the 7-day possible trend.
+
+Also decided to try to look at the 192-day possible trend.
+
+Finally, also decided to put the 7 day and 192 day together on one plot.
+
+```{r}
+
+time.NO2 <- c(1:(length(dailyAQ.ts)))
+NO2.ts.lm1 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7))
+
+NO2.ts.lm2 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192))
+
+NO2.ts.lm3 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192))
+
+summary(NO2.ts.lm1)
+summary(NO2.ts.lm2)
+summary(NO2.ts.lm3)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm1$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm2$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm3$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+It looks like both of the seasonal trends may be descriptive of the time series data
+since at least one of the coefficients of the sin or cos term is valid at the
+0.05 level.
+
+Next need to look at some diagnostics for these three models.
+
+```{r}
+
+AIC(NO2.ts.lm1)
+AIC(NO2.ts.lm2)
+AIC(NO2.ts.lm3)
+
+```
+
+As an initial look, the AIC for the time series including both the 7-day and 
+192-day seasons is the best so we should continue with this model until we
+find something that works better.
+
+Maybe add a 10-day season as well?
+
+```{r}
+
+NO2.ts.lm4 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/10)+cos(2*pi*time.NO2/10))
+
+summary(NO2.ts.lm4)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm4$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+Not sure whether this is a normal technique or not but what about looking at a
+lot of different values for this?  Prime numbers are probably the best to look at
+first.
+
+```{r}
+
+i <- 364
+
+1/i
+
+NO2.ts.lm5 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/i)+cos(2*pi*time.NO2/i))
+  
+summary(NO2.ts.lm5)
+AIC(NO2.ts.lm5)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm5$fitted.values),color="red") + xlab("") + ylab("NO2%%")
+
+```
+
+28 (AIC 3982.339) and 64 (AIC 3970.735) both look interesting
+
+128: AIC 3988.009
+77: AIC 3980.565
+64*7=448: AIC 3959.162
+364: AIC 3956.527
+365: AIC 3956.562
+
+Looks like 365 is a good choice. Next we'll build a model with the three timeframes
+7, 192, and 365.
+
+```{r}
+
+NO2.ts.lm6 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192)+sin(2*pi*time.NO2/365)+cos(2*pi*time.NO2/365))
+
+summary(NO2.ts.lm6)
+AIC(NO2.ts.lm6)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm6$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+The AIC dropped significantly for this model. Maybe try it with just 7-day and 
+365-day seasons to see if that is just as good.
+
+```{r}
+
+NO2.ts.lm7 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/365)+cos(2*pi*time.NO2/365))
+
+summary(NO2.ts.lm7)
+AIC(NO2.ts.lm7)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm7$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+AIC was better with all three seasonal terms 7-, 192-, and 365-day). We can explain
+the 7- and 365-day intervals but the 192-day is a mystery. It is possible that this
+will lead to overfitting the data and may perform worse on the test data.
+
+
+
