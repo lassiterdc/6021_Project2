@@ -19,6 +19,13 @@ opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
 library(ggplot2)
+library(ggfortify)
+library(mtsdi)
+library(forecast)
+library(lubridate)
+library(tidyverse)
+library(ggpubr)
+library(tseries)
 ```
 
 # Load data and impute missing values
@@ -142,27 +149,180 @@ summary(no27.trend)
 # no, this isn't good enough to see a tredn though
 # because we need to account for seasonality
 
-# Plot temp.trend model
+# Plot no27.trend model
 ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() +
   stat_smooth(method="lm",col="red") + xlab("") + ylab("Richmond Tmin")
 
-# Model diagnostics for temp.trend
+# Model diagnostics for no27.trend
 autoplot(no2.7.trend, labels.id = NULL)
     
-# Are there any issue with the diagnostic plots for the temp.trend model?
+# Are there any issues with the diagnostic plots for the no27.trend model?
 
 # Model seasonality
 no27.trend.seasonal <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/12) + cos(2*pi*time.no2/12))
 summary(no27.trend.seasonal)
-# now we know temperature (t) is significant and it is positive
-# Plot temp.trend.seasonal model
+# now we know concentration is significant and it is positive
+# Plot no27.trend.seasonal model
 ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
   geom_line(aes(x=Group.1,y=no27.trend.seasonal$fitted.values),color="red") 
 
-# Model diagnostics for temp.trend.seasonal
+# Model diagnostics for no27.trend.seasonal
 autoplot(no27.trend.seasonal, labels.id = NULL)
 #168 TS2
 
 #lung box, assumptions of independent residuals, then suggest more terms than 6 lags ago to capture correlation or maybe there's a missing moving average
+
+# Get the residuals from the temp.trend.seasonal model above and store in e.ts.temp:
+e.ts.no27 <- ts(no27.trend.seasonal$residuals)
+    
+# Plot the residuals for the temp.trend model
+autoplot(e.ts.no27)
+# we want it to have an average mean of constant 0
+# it is close, but there still is some non-independence
+# that we need to capture as well
+
+# Plot the autocorrelation (ACF) of the residuals of temp.trend.seasonal
+no27.acf <- ggAcf(e.ts.no27)
+no27.acf
+# several lags are significant, there is some sinosoidal
+# behavior but it doesn't cut off so look at PACF
+
+# Plot the partial autocorrelation (PACF) of the residuals temp.trend.seasonal
+no27.pacf <- ggPacf(e.ts.no27)
+no27.pacf
+# also has sinosoidal behavior and doesn't cut off
+# which suggests we may have autoregressive and moving average terms
+# Does this time series still have structure to be modeled?
+# Probably, we could have some autoregressive terms to be examined.
+# Choose p and q terms for e.ts.temp based on the acf and pacf 
+
+# Ar1 3857 aic
+#MA2 3855 aic
+#ARMA2 3849
+# therefore, the fact that ARMA has best aic seems to show that
+# our hypothesis that it has autoregressive and moving average terms
+#use automated selection method to see what p and q values are the best
+
+# using arima() function to find best p, q, and d values
+no27.auto <- auto.arima(e.ts.no27, approximation= FALSE)
+summary(no27.auto)
+#(2, 0, 1) (p, d, q), 
+# aic = 3786.9
+```
+```{r}
+# Examining based off of TS3 lecture:
+
+# ar(1) p=1
+no27.ar1 <- arima(e.ts.no27, order=c(1,0,0), include.mean=FALSE)
+summary(no27.ar1)     #3793.49
+
+# ma(2) p=0, q=2
+no27.ma2 <- arima(e.ts.no27, order=c(0,0,2), include.mean=FALSE)
+summary(no27.ma2)     #3827.75
+
+# arma(1,2) p=1, q=2
+no27.arma12 <- arima(e.ts.no27, order=c(1,0,2), include.mean=FALSE)
+summary(temp.arma12)     #3815.84
+
+# auto from above
+summary(no27.auto)     #3786.9
+# Based on AIC, no27.auto appears to be the best
+
+# BIC (penalizes additional terms more)
+BIC(no27.ar1)     #3801.388
+BIC(no27.ma2)     #3839.602
+BIC(no27.arma12)     #3803.168
+BIC(no27.auto)     #3802.705
+# Based on BIC. no27.ar1 is the best with no27.auto being a close 2nd
+
+
+```
+```{r}
+# assess residuals vs. fitted
+model1 = ggplot() + geom_point(aes(x=fitted(no27.ar1), y=no27.ar1$residuals)) + ggtitle("AR1")
+model2 = ggplot() + geom_point(aes(x=fitted(no27.ma2), y=no27.ma2$residuals)) + ggtitle("MA2")
+model3 = ggplot() + geom_point(aes(x=fitted(no27.arma12), y=no27.arma12$residuals)) + ggtitle("ARMA12")
+model4 = ggplot() + geom_point(aes(x=fitted(no27.auto), y=no27.auto$residuals)) + ggtitle("Auto")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+# all seem to have constant mean of zero, no significant differences
+
+
+# assess normality of residuals
+model1 = qplot(sample=no27.ar1$residuals) + stat_qq_line(color="red") + ggtitle("AR1")
+model2 = qplot(sample=no27.ma2$residuals) + stat_qq_line(color="red") + ggtitle("MA2")
+model3 = qplot(sample=no27.arma12$residuals) + stat_qq_line(color="red") + ggtitle("ARMA12")
+model4 = qplot(sample=no27.auto$residuals) + stat_qq_line(color="red") + ggtitle("Auto")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+# all look roughly the same and pretty good, looks pretty gaussian
+# so we're now mostly interested in seeing if our residuals are independent
+
+# Plot diagnostics for independence of residuals using tsdiag()
+ggtsdiag(no27.ar1,gof.lag=20)
+# good for up to 6 lags
+ggtsdiag(no27.ma2,gof.lag=20)
+# up to 1 lag
+ggtsdiag(no27.arma12,gof.lag=20)
+# about 6 lags
+ggtsdiag(no27.auto,gof.lag=20)
+# good for 6 lags
+
+# no27arma12, no27.auto, and no27.ar1 are the most adequate, while
+# no27.ma2 isn't great
+
+# Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of temp.auto
+no27.auto.resid.acf <- ggAcf(no27.auto$residuals)
+no27.auto.resid.pacf <- ggPacf(no27.auto$residuals)
+ggarrange(no27.auto.resid.acf, no27.auto.resid.pacf,nrow=2,ncol=1)
+
+# Does the temp.auto model account for correlation in the residuals?
+
+# Yes
+
+
+# Plot the best model's fitted values vs. true values
+# Since the best AR model has p=1, we start predicting at t=2
+Tmin.fitted <- temp.trend.seasonal$fitted.values + fitted(temp.auto)
+
+ggplot() + geom_line(aes(x=time.temp,y=temp.ts[1:length(time.temp)],color="True")) +
+  geom_line(aes(x=time.temp,y=Tmin.fitted,color="Fitted")) + xlab("Time") + 
+  ylab("Richmond Tmin")
+
+
+```
+
+```{r}
+# Forecasting the next 7 days with the best model: (using auto for now)
+
+no27.auto.forecast <- forecast(no27.auto, h=6)
+
+plot(no27.auto.forecast)
+
+# with ggplot
+autoplot(no27.auto.forecast,main="Forecasts from ARIMA(2,0,1) with zero mean")
+
+# The actual time series for the period including the last week is NO2.ts
+# Prediction for the next week by no27.auto:
+
+E_Y.pred <- predict(no27.trend.seasonal, newdata=dailyAQ)
+e_t.pred <- forecast(no27.auto, h=6)
+next.wk.prediction <- E_Y.pred + e_t.pred$mean
+
+# MSE:
+
+mean((next.wk.prediction- dailyAQ$NO2.GT)^2)
+#__, can repeat w alternate models
+
+# Plot actual values and predicted values
+plot(ts(dailyAQ$NO2.GT),type='o',ylim=c(25,60))
+lines(ts(next.wk.prediction),col='red',type='o')
+lines(1:6, E_Y.pred + e_t.pred$lower[,2], col = "red", lty = "dashed")
+lines(1:6, E_Y.pred + e_t.pred$upper[,2], col = "red", lty = "dashed")
+legend(1,60, legend = c("Actual", "Predicted"), lwd = 2, col = c("black", "red")) 
+
+# Note: Can repeat this process with other models as needed.
+
+
 ```
 
