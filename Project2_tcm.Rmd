@@ -18,10 +18,17 @@ sourcedir <-"C:/Users/tcmuh/Desktop/Fall2020/SYS6021/Source"
 opts_knit$set(root.dir = sourcedir)
 library(forecast)
 library(imputeTS)
+library(mtsdi)
+library(ggplot2)
+library(lubridate)
+library(tidyverse)
+library(ggfortify)
+library(ggpubr)
+library(tseries)
 ```
 
 # Load data and impute missing values
-```{r cars}
+```{r cars, warning=FALSE}
 setwd(datadir)
 
 airquality = read.csv('AirQualityUCI.csv')
@@ -47,3 +54,382 @@ dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=ma
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
 ```
+
+First need to visualize the data:
+
+```{r}
+
+AQdata.ts <- ts(AQdata)
+autoplot(AQdata.ts)
+
+dailyAQ.train <- dailyAQ[1:(dim(dailyAQ)[1]-7),]
+
+dailyAQ.ts <- ts(dailyAQ.train$NO2.GT.)
+autoplot(dailyAQ.ts)
+
+```
+
+
+
+```{r}
+
+spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
+
+
+```
+
+From PG highest peak at 192 days, next one may be about 7 days.
+
+Also looks like it may have a constant mean for the first 180-200 days and then an increasing trend.
+
+Next step is to look at the 7-day possible trend.
+
+Also decided to try to look at the 192-day possible trend.
+
+Finally, also decided to put the 7 day and 192 day together on one plot.
+
+```{r}
+
+time.NO2 <- c(1:(length(dailyAQ.ts)))
+NO2.ts.lm1 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7))
+
+NO2.ts.lm2 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192))
+
+NO2.ts.lm3 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192))
+
+summary(NO2.ts.lm1)
+summary(NO2.ts.lm2)
+summary(NO2.ts.lm3)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm1$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm2$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm3$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+It looks like both of the seasonal trends may be descriptive of the time series data
+since at least one of the coefficients of the sin or cos term is valid at the
+0.05 level.
+
+Next need to look at some diagnostics for these three models.
+
+```{r}
+
+AIC(NO2.ts.lm1)
+AIC(NO2.ts.lm2)
+AIC(NO2.ts.lm3)
+
+```
+
+As an initial look, the AIC for the time series including both the 7-day and 
+192-day seasons is the best so we should continue with this model until we
+find something that works better.
+
+Maybe add a 10-day season as well?
+
+```{r}
+
+NO2.ts.lm4 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/10)+cos(2*pi*time.NO2/10))
+
+summary(NO2.ts.lm4)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm4$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+10 days was not useful in describing the trend.
+
+Not sure whether this is a normal technique or not but what about looking at a
+lot of different values for this?  Prime numbers are probably the best to look at
+first.
+
+```{r}
+
+i <- 364
+
+1/i
+
+NO2.ts.lm5 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/i)+cos(2*pi*time.NO2/i))
+  
+summary(NO2.ts.lm5)
+AIC(NO2.ts.lm5)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm5$fitted.values),color="red") + xlab("") + ylab("NO2%%")
+
+```
+
+28 (AIC 3982.339) and 64 (AIC 3970.735) both look interesting
+
+128: AIC 3988.009
+77: AIC 3980.565
+64*7=448: AIC 3959.162
+364: AIC 3956.527
+365: AIC 3956.562
+
+Looks like 365 is a good choice. Next we'll build a model with the three timeframes
+7, 192, and 365.
+
+```{r}
+
+NO2.ts.lm6 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/192)+cos(2*pi*time.NO2/192)+sin(2*pi*time.NO2/365)+cos(2*pi*time.NO2/365))
+
+summary(NO2.ts.lm6)
+AIC(NO2.ts.lm6)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm6$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+The AIC dropped significantly for this model. Maybe try it with just 7-day and 
+365-day seasons to see if that is just as good.
+
+```{r}
+
+NO2.ts.lm7 <- lm(dailyAQ.train$NO2.GT.~time.NO2+sin(2*pi*time.NO2/7)+cos(2*pi*time.NO2/7)+sin(2*pi*time.NO2/365)+cos(2*pi*time.NO2/365))
+
+summary(NO2.ts.lm7)
+AIC(NO2.ts.lm7)
+
+ggplot(dailyAQ.train[1:(length(dailyAQ.ts)),], aes(x=time.NO2,y=NO2.GT.)) + geom_line() +   geom_line(aes(x=time.NO2,y=NO2.ts.lm7$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+AIC was better with all three seasonal terms (7-, 192-, and 365-day). We can explain
+the 7- and 365-day intervals but the 192-day is a mystery (it is one half the length
+of the data set of 384 observations). It is possible that this will lead to 
+overfitting the data and may perform worse on the test data.
+
+Recommend we look at both the 7 and 365-day seasons for sure and compare the results
+to the model using the 192-day season as well.
+
+Lets take a look at the residuals now.
+
+```{r}
+
+plot(NO2.ts.lm6$residuals)
+
+```
+
+The residuals don't look too bad although they may be growing slightly in magnitude
+from the start to the end. I think they appear to be zero-mean.
+
+Next step is to model the residuals.
+
+```{r}
+
+AQresiduals <- NO2.ts.lm6$residuals
+
+AQresiduals.ts <- ts(AQresiduals)
+
+autoplot(AQresiduals.ts)
+
+```
+
+Is there a pattern to try to model with the residuals? I think so but let's look
+at the ACF and PACF and see what might be in there.
+
+```{r}
+
+AQres.acf <- ggAcf(AQresiduals.ts)
+AQres.pacf <- ggPacf(AQresiduals.ts)
+ggarrange(AQres.acf,AQres.pacf,nrow=2,ncol=1)
+
+```
+
+From the ACF, the residuals may not be stationary. From the PACF, there are many
+that are significant: at 1, 3, 7, 12, and 15 (not sure about 2).
+
+The next step is to do an ARIMA model and see what comes out.
+
+```{r}
+
+AQres.auto <- auto.arima(AQresiduals.ts,approximation=FALSE)
+summary(AQres.auto)
+
+```
+
+So no difference was needed, only a (3,0,2) model with 3 autocorrelation terms and
+2 moving average terms.
+
+The next step will be to see if I can improve on that with some different models
+from the ACF and PACF graphs. Both the ACF and PACF look like they are somewhat
+sinusoidal (PACF and ACF) and/or exponential (ACF) so an ARMA model is likely the
+best choice.
+
+I think I'll try a (2,1,2) model next and then a (3,1,2) model and see how they do
+with AIC.
+
+```{r}
+
+AQres.212 <- arima(AQresiduals.ts, order=c(2,1,2), include.mean=FALSE)
+summary(AQres.212)
+
+AQres.312 <- arima(AQresiduals.ts, order=c(3,1,2), include.mean=FALSE)
+summary(AQres.312)
+
+AQres.303 <- arima(AQresiduals.ts, order=c(3,0,3), include.mean=FALSE)
+summary(AQres.303)
+
+AQres.313 <- arima(AQresiduals.ts, order=c(3,1,3), include.mean=FALSE)
+summary(AQres.313)
+
+AQres.304 <- arima(AQresiduals.ts, order=c(3,0,4), include.mean=FALSE)
+summary(AQres.304)
+
+```
+
+After all those tests, the (3,0,3) model did best based on AIC:
+
+(3,0,2) AIC: 3741.84
+(3,1,3) AIC: 3738.84
+(3,0,3) AIC: 3732.94
+
+Next step is to look at the diagnostic plots.
+
+```{r}
+
+model1 = ggplot() + geom_point(aes(x=fitted(AQres.313), y=AQres.313$residuals)) + ggtitle("ARIMA (3,1,3)")
+model2 = ggplot() + geom_point(aes(x=fitted(AQres.auto), y=AQres.auto$residuals)) + ggtitle("Auto (3,0,2)")
+model3 = ggplot() + geom_point(aes(x=fitted(AQres.303), y=AQres.303$residuals)) + ggtitle("ARIMA (3,0,3)")
+model4 = ggplot() + geom_point(aes(x=fitted(AQres.312), y=AQres.312$residuals)) + ggtitle("ARIMA (3,1,2)")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+
+```
+
+No issues with the residuals vs. fitted.
+
+```{r}
+
+model1 = qplot(sample=AQres.313$residuals) + stat_qq_line(color="red") + ggtitle("ARIMA (3,1,3)")
+model2 = qplot(sample=AQres.auto$residuals) + stat_qq_line(color="red") + ggtitle("Auto (3,0,2)")
+model3 = qplot(sample=AQres.303$residuals) + stat_qq_line(color="red") + ggtitle("ARIMA (3,0,3)")
+model4 = qplot(sample=AQres.312$residuals) + stat_qq_line(color="red") + ggtitle("ARIMA (3,1,2)")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+
+```
+
+No problems with the Q-Q plots although the (3,0,3) looks the best as it doesn't
+tail off as much at the upper end.
+
+```{r}
+
+# Diagnostics for independence
+ggtsdiag(AQres.313,gof.lag=20)
+ggtsdiag(AQres.auto,gof.lag=20)
+ggtsdiag(AQres.303,gof.lag=20)
+ggtsdiag(AQres.312,gof.lag=20)
+
+```
+
+The first three models look about the same with similar lags~=20. The last only
+has about 11 lags of independence.
+
+We'll continue with the best model so far: the ARIMA (3,0,3) model.
+
+Look at the ACF and PACF of the residuals.
+
+```{r}
+
+AQres.303.acf <- ggAcf(AQres.303$residuals)
+AQres.303.pacf <- ggPacf(AQres.303$residuals)
+ggarrange(AQres.303.acf,AQres.303.pacf,nrow=2,ncol=1)
+
+```
+
+The spikes in the ACF and PACF at lag 11 are strange but the rest of the plots are
+within the +/-0.1 bounds.
+
+Next we need to look at the plot of the predicted vs. actual residuals.
+
+```{r}
+
+AQdata.fitted <- NO2.ts.lm6$fitted.values + fitted(AQres.auto)
+
+ggplot() + geom_line(aes(x=time.NO2,y=NO2.ts[1:length(time.NO2)],color="True")) +
+  geom_line(aes(x=time.NO2,y=AQdata.fitted,color="Fitted")) + xlab("Time") + 
+  ylab("Daily NO2 level")
+
+```
+
+The Fitted plot looks pretty good, not as extreme at some points but generally 
+trending close to the True value.
+
+The next step is to use the model to predict the last 7 days that we didn't use
+for training the model.
+
+```{r}
+
+AQdata.best.forecast <- forecast(AQres.303, h=7)
+
+plot(AQdata.best.forecast)
+
+next.7day.time <- c((length(dailyAQ.ts)-6):(length(dailyAQ.ts)))
+
+dailyAQ.all.ts <- ts(dailyAQ)
+
+# The test data frame
+next.7day <- data.frame(time.NO2 = next.7day.time, NO2.GT. = NO2.ts[next.7day.time])
+
+# The actual time series for the test period
+next.7day.ts <- dailyAQ.ts[next.7day.time]
+next.7day.ts <- ts(next.7day$NO2.GT.)
+
+# Prediction for the next 7 days by ARIMA(3,0,3) model:
+E_Y.pred <- predict(NO2.ts.lm6, newdata=next.7day)
+e_t.pred <- forecast(AQres.303, h=7)
+next.7day.prediction <- E_Y.pred + e_t.pred$mean
+
+# MSE:
+mean((next.7day.prediction-next.7day$NO2.GT.)^2)
+
+time.predictions <- dailyAQ$Group.1[(length(time.NO2)+1):(length(time.NO2)+7)]
+model1.predictions <- ggplot() + 
+  geom_line(aes(x=time.predictions,y=next.7day$NO2.GT.),color="black") + 
+  geom_line(aes(x=time.predictions,y=next.7day.prediction),color="red") + 
+  geom_line(aes(x=time.predictions,y=E_Y.pred + e_t.pred$lower[,2]),
+            color="red",linetype="dashed") + 
+  geom_line(aes(x=time.predictions,y=E_Y.pred + e_t.pred$upper[,2]),
+            color="red",linetype="dashed") +
+  xlab("") + ylab("NO2") + 
+  ggtitle("NO2 Trend + Seasonal Model + ARIMA of Residuals")
+
+model1.predictions
+
+```
+
+That looks pretty good. The entire True line falls inside the lower and upper bounds
+of the prediction model.
+
+End of part 1
+
+Part 2
+
+Simulate a year's worth of NO2 data.
+
+```{r}
+
+# Simulate 365 days of NO2 with the best model
+# auto.arima builds ARMA(2,1) model
+set.seed(1)
+auto.sim <- arima.sim(n=365, list(ar=c(AQres.303$coef[1],AQres.303$coef[2]),
+                                      ma=c(AQres.303$coef[3])),
+                        sd=sqrt(AQres.303$sigma2))
+
+# Add mean predictions and plot simulation of NO2 level
+next.365day.time <- c(1:365)
+next.365day <- data.frame(time.NO2 = next.365day.time)
+
+next.365day.predictions <- predict(NO2.ts.lm6, newdata=next.365day)
+
+# plot simulated NO2 level
+autoplot(ts(next.365day.predictions + auto.sim),xlab="Time",ylab="Simulated NO2 Level")
+
+```
+
+There are a couple of weird points where the simulated value falls below zero but
+other than that it looks similar to the original, actual data set. I'm not sure if
+this is for the next 365 days or for just a random 365-day interval.

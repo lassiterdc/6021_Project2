@@ -1,16 +1,24 @@
 ---
 title: "Project 2"
-author: "Group Members' Names"
-date: "Date"
+author: ""
+date: ""
 output:
-  pdf_document: default
-  html_document: default
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    number_sections: true
+    theme: united
+  pdf_document:
+    toc: true
+    number_sections: true
 ---
 
-```{r setup, include=FALSE}
-require("knitr")
-opts_knit$set(root.dir = sourcedir)
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = TRUE, fig.fullwidth=TRUE)
+```
 
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
 library(forecast)
 library(imputeTS)
 library(ggplot2)
@@ -29,6 +37,7 @@ library(MTS)
 library(here)
 library(tsibble)
 library(feasts)
+library(fable)
 
 sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
 datadir <- paste0(here(), "/")
@@ -72,33 +81,191 @@ dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")),
                      FUN=max) %>% as_tsibble(index = Group.1) %>%
           rename("Date" = "Group.1") %>% rename("NO2" = "NO2.GT.")
 
-
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
 ```
 
+# Exploratory Data Analysis
+```{r}
+# For quickly formatting plots
+my_theme <- theme(plot.title = element_text(hjust = 0.5, size = 16), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12),
+        plot.caption = element_text(size = 12, hjust = 0))
+```
+
 ```{r}
 dailyAQ %>% autoplot(NO2) + ylab("NO2 (mg/m^3)") + xlab("Date") + 
-  ggtitle("Nitrogen Concentration") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
-        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+  ggtitle("Nitrogen Concentration") + my_theme
+```
 
+The time series plot indicates potential seasonal components and a potential trend component.
+
+```{r}
 dailyAQ %>% gg_season(NO2, period = "week") + ylab("NO2 (mg/m^3)") + xlab("") + 
-    ggtitle("Nitrogen Concentration") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
-        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+    ggtitle("Nitrogen Concentration") + my_theme
+  
+```
 
-dailyAQ %>% model(STL(NO2)) %>% components() %>% autoplot() + ylab("Mean Flow (cfs)") + 
-  ggtitle("Average Spring Flow: Grand Coulee") + theme(plot.title = element_text(hjust = 0.5, size = 16), 
-        axis.title = element_text(size = 12), axis.text = element_text(size = 12))
+This plot indicates an increasing trend over time.
 
-dailyAQ %>%
-  model(STL(NO2 ~ trend(window=21) + season(window = "periodic"), # + season(window="periodic"), 
-    robust = TRUE)) %>%
-  components() %>%
-  autoplot()
 
-dailyAQ %>% ACF(NO2) %>% autoplot()
+```{r}
+dailyAQ %>% model(STL(NO2 ~ trend(window=21) + season(window = "periodic"), robust = TRUE)) %>%
+  components() %>%autoplot() + my_theme + ylab("NO2 (mg/m^3)")
+```
 
-dailyAQ %>% PACF(NO2) %>% autoplot()
+This seasonal decomposition chart shows a possibly increasing trend and a weekly seasonal component.
+
+
+```{r}
+dailyAQ %>% ACF(NO2) %>% autoplot() + ggtitle("Nitrogen Concentration ACF plot") + my_theme
+
+dailyAQ %>% PACF(NO2) %>% autoplot() + ggtitle("Nitrogen Concentration PACF plot") + my_theme
+```
+
+* The ACF shows sinusoidal decay. 
+  * This indicates that we need to include an AR term in the model.
+* The PACF decreases from the 1st to the 2nd lag and becomes insignificant at the 4th lag. 
+  * This indicates that our AR component should be order 3. (?)
+* Significant lags also occur after the 4th lag.
+* The plot may show some seasonality.
+  * If this is the case, then there would be a moving average term. However, 
+  the ACF doesn't cut off so it's likely it is an AR(3) model only.
+
+
+```{r}
+pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
+
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)
+ggplot(spec.NO2) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of NO2") + my_theme
+
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) %>% arrange(desc(spec))
+spec.NO2[18, ]
+```
+* There is a peak at around 1.5 which corresponds to a seasonality component
+  with a period of 1 week.
+  
+## Hypotheses from exploratory data analysis:
+
+* There is an increasing trend in NO2 emissions. This could be due to increasing cars on the road over time.
+* There is a weekly seasonal component. This could be a function of the number of cars on the road,
+  and perhaps traffic is higher on the weekends.
+* The ACF and PACF plots indicate that the process could be autorgressive with order 3.
+
+
+
+# Building Univariate Time Series Models
+```{r}
+# Remove last 7 days of data
+dailyAQ_train <- dailyAQ %>% head(n = length(Date) - 7)
+```
+
+
+## Modeling
+```{r}
+library(timeDate)
+
+
+dailyAQ_train <- dailyAQ_train %>% mutate(step = 1:length(Date)) %>%
+      mutate(day = as.factor(as.character(lubridate::wday(Date, label  = TRUE)))) %>%
+      mutate(weekend = isWeekend(Date))
+
+models <- dailyAQ_train %>%
+  model(trend = TSLM(NO2 ~ trend()),
+        trend_season_7 = TSLM(NO2 ~ trend() + sin(2*pi*step/7) + cos(2*pi*step/7)), 
+        season_7 = TSLM(NO2 ~ sin(2*pi*step/7) + cos(2*pi*step/7)),
+        trend_season_30 = TSLM(NO2 ~ trend() + sin(2*pi*step/30) + cos(2*pi*step/30)), 
+        season_30 = TSLM(NO2 ~ sin(2*pi*step/30) + cos(2*pi*step/30)),
+        trend_season_w_wkday_dummy = TSLM(NO2 ~ trend() + day),         
+        trend_season_w_wknd_dummy = TSLM(NO2 ~ trend() + weekend))
+```
+
+
+### Trend
+```{r}
+models %>% select(trend) %>% report()
+```
+The coefficient on trend is significant, and plotting the modeled trend line 
+against the original data below verifies this.
+
+```{r}
+models %>% select(trend) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend Model") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+
+### Seasonality
+The model summary and graph of the auto-selected trend and season model 
+shows that the trend is still significant. The 3 week and 4 week coefficients
+
+
+```{r}
+models %>% select(trend_season_w_wkday_dummy) %>% report()
+
+models %>% select(trend_season_w_wkday_dummy) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend-Season Model with Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+
+This model used a dummy variable for each weekday. Friday is the base case.
+Only Saturday and Sunday were significantly different from the base case. NO2
+concentrations on these days are lower. Perhaps traffic is heavier during the
+weekdays because of commuters. It is also notable that the trend term is still
+significant once the seasonality component has been accounted for.
+
+The models reported in the summary and plot below had trigonometric functions 
+to model 7 day and 30 day seasonal components.
+```{r}
+models %>% select(trend_season_7, trend_season_30) %>% coef()
+
+models %>% 
+  select(trend_season_7, trend_season_30) %>% 
+  fitted() %>% autoplot() +
+  autolayer(dailyAQ_train) + 
+  ggtitle("Trend-Season Model with Trigonometric Functions") + 
+  ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+To decide which is the best approach, we compared performance metrics across
+the models with a trend and seasonal component.
+
+```{r}
+models %>% 
+  select(trend_season_7, trend_season_30, trend_season_w_wkday_dummy) %>% 
+  report() %>% select(.model, adj_r_squared, AIC, BIC, df.residual)
+```
+
+The third model in the list which was built with day-of-the-week dummy variables
+has the best adjust R-squared, AIC, and the lowest residuals. The model built
+with trigonometric functions and a 7 day wavelength had a better BIC, so either
+could be a valid way to model seasonality.
+
+Next I tried modeling the seasonal component with a single dummy variable 
+for whether the date was on a weekday or weekend.
+
+```{r}
+models %>% select(trend_season_w_wknd_dummy) %>% report()
+
+models %>% select(trend_season_w_wknd_dummy) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend-Season Model with Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+Unsurprisingly, the variable was significant. Finally, to compare with the rest:
+
+```{r}
+models %>% 
+  select(trend_season_7, trend_season_30, 
+         trend_season_w_wkday_dummy, trend_season_w_wknd_dummy) %>% 
+  report() %>% select(.model, adj_r_squared, AIC, BIC, df.residual)
 
 ```
 
+
+The model with the weekend/weekdaay dummy variable performed best across all 
+metrics except for the residuals, but the difference there is small. This is
+how I will model seasonality for the remainder of this analysis.
