@@ -75,7 +75,6 @@ autoplot(dailyAQ.ts)
 
 spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
 
-
 ```
 
 From PG highest peak at 192 days, next one may be about 7 days.
@@ -404,6 +403,36 @@ model1.predictions
 That looks pretty good. The entire True line falls inside the lower and upper bounds
 of the prediction model.
 
+I want to redo that part with the auto.arima model as well and see how it did.
+
+```{r}
+
+# Prediction for the next 7 days by ARIMA(3,0,3) model:
+E_Y.pred <- predict(NO2.ts.lm6, newdata=next.7day)
+e_t.pred <- forecast(AQres.auto, h=7)
+next.7day.prediction <- E_Y.pred + e_t.pred$mean
+
+# MSE:
+mean((next.7day.prediction-next.7day$NO2.GT.)^2)
+
+time.predictions <- dailyAQ$Group.1[(length(time.NO2)+1):(length(time.NO2)+7)]
+model.auto.prediction <- ggplot() + 
+  geom_line(aes(x=time.predictions,y=next.7day$NO2.GT.),color="black") + 
+  geom_line(aes(x=time.predictions,y=next.7day.prediction),color="red") + 
+  geom_line(aes(x=time.predictions,y=E_Y.pred + e_t.pred$lower[,2]),
+            color="red",linetype="dashed") + 
+  geom_line(aes(x=time.predictions,y=E_Y.pred + e_t.pred$upper[,2]),
+            color="red",linetype="dashed") +
+  xlab("") + ylab("NO2") + 
+  ggtitle("NO2 Trend + Seasonal Model + ARIMA of Residuals")
+
+model.auto.prediction
+
+```
+
+MSE is better on the ARIMA(3,0,3) model so we'll stick with that model as we go
+to the next section.
+
 End of part 1
 
 Part 2
@@ -413,11 +442,11 @@ Simulate a year's worth of NO2 data.
 ```{r}
 
 # Simulate 365 days of NO2 with the best model
-# auto.arima builds ARMA(2,1) model
+
 set.seed(1)
-auto.sim <- arima.sim(n=365, list(ar=c(AQres.303$coef[1],AQres.303$coef[2]),
-                                      ma=c(AQres.303$coef[3])),
-                        sd=sqrt(AQres.303$sigma2))
+auto.sim <- arima.sim(n=365, list(ar=c(AQres.303$coef[1],AQres.303$coef[2],AQres.303$coef[3]),
+                                  ma=c(AQres.303$coef[4],AQres.303$coef[5],AQres.303$coef[6])),
+                                  sd=sqrt(AQres.303$sigma2))
 
 # Add mean predictions and plot simulation of NO2 level
 next.365day.time <- c(1:365)
@@ -425,11 +454,115 @@ next.365day <- data.frame(time.NO2 = next.365day.time)
 
 next.365day.predictions <- predict(NO2.ts.lm6, newdata=next.365day)
 
-# plot simulated NO2 level
-autoplot(ts(next.365day.predictions + auto.sim),xlab="Time",ylab="Simulated NO2 Level")
+# plot simulated NO2 level vs actual
+b=autoplot(ts(next.365day.predictions + auto.sim),xlab="Time",ylab="Simulated NO2 Level")
+a=autoplot(dailyAQ.ts, xlab="Time", ylab="Actual NO2 level")
+
+ggarrange(a,b,nrow=2,ncol=1)
 
 ```
 
-There are a couple of weird points where the simulated value falls below zero but
-other than that it looks similar to the original, actual data set. I'm not sure if
-this is for the next 365 days or for just a random 365-day interval.
+The two sets look similar but I'm not sure if this is for the next 365 days or for
+just a random 365-day interval.
+
+The next step is to look at the periodogram of the original data compared to the
+periodogram of the simulated data.
+
+```{r}
+
+simAQ.ts <- next.365day.predictions + auto.sim
+
+spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
+spec.pgram(simAQ.ts,spans=9,demean=T,log='no')
+
+
+```
+
+The two look similar except the peaks are slightly different magnitude in the
+simulated data and there is a new peak in the 0.05-0.06 range.
+
+Next step is to model the simulated data and see if the trend, seasonality, and
+residuals all look similar.
+
+```{r}
+
+simAQ <- as.numeric(simAQ.ts)
+
+NO2sim.ts.lm6 <- lm(simAQ~next.365day.time+sin(2*pi*next.365day.time/7)
+                    +cos(2*pi*next.365day.time/7)+sin(2*pi*next.365day.time/192)
+                    +cos(2*pi*next.365day.time/192)+sin(2*pi*next.365day.time/365)
+                    +cos(2*pi*next.365day.time/365))
+
+summary(NO2sim.ts.lm6)
+AIC(NO2sim.ts.lm6)
+
+NO2.ts.lm6$coefficients[2]
+NO2sim.ts.lm6$coefficients[2]
+
+abs(NO2.ts.lm6$coefficients[2]-NO2sim.ts.lm6$coefficients[2])/NO2.ts.lm6$coefficients[2]
+
+ggplot(simAQ.ts, aes(x=next.365day.time,y=simAQ)) + geom_line() +   geom_line(aes(x=next.365day.time,y=NO2sim.ts.lm6$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+
+```
+
+The coefficients are in the same range although the coefficients on time in the
+simulation is somewhat distant, 24.1% different (using (actual-sim)/actual) from
+the coefficient on the actual time series. With the somewhat random error, this
+is not unexpected.
+
+Next is to find the percent difference in the mean and variance of the real time
+series and the simuated one.
+
+```{r}
+
+mean(dailyAQ.ts)
+var(dailyAQ.ts)
+
+mean(simAQ.ts)
+var(simAQ.ts)
+
+abs(mean(dailyAQ.ts)-mean(simAQ.ts))/mean(dailyAQ.ts)
+abs(var(dailyAQ.ts)-var(simAQ.ts))/var(dailyAQ.ts)
+
+```
+
+The mean and variance are quite a bit better than the time coefficients with the
+percent difference between the means at .46% and the percent difference between
+the variances at 6.1%.
+
+Next we'll compare the ACF and PACF between the actual data and the simulated data.
+
+```{r}
+
+AQsim.residuals <- NO2sim.ts.lm6$residuals
+AQsim.residuals.ts <- ts(AQsim.residuals)
+
+AQsim.res.acf <- ggAcf(AQsim.residuals.ts)
+AQsim.res.pacf <- ggPacf(AQsim.residuals.ts)
+
+ggarrange(AQres.acf,AQsim.res.acf,AQres.pacf,AQsim.res.pacf,nrow=2,ncol=2)
+
+```
+
+The simulated ACF and PACF do not exactly the same as the actual ACF and PACF but
+we should see what the auto.arima function says about the simulated residuals.
+
+```{r}
+
+AQsim.res.auto <- auto.arima(AQsim.residuals.ts,approximation=FALSE)
+summary(AQres.auto)
+summary(AQsim.res.auto)
+
+AQsim.res.303 <- arima(AQsim.residuals.ts, order=c(3,0,3), include.mean=FALSE)
+summary(AQres.303)
+summary(AQsim.res.303)
+
+```
+
+What is interesting is that the auto.arima gave (3,0,2) for the actual data and 
+(1,0,0) for the simulated data but the AIC for the (3,0,3) model of the residuals
+is actually better for both of them.
+
+All in all, the simulation is a pretty good estimate of a series similar to the
+actual data we originally modeled.
