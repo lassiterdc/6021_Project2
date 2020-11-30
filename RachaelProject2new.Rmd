@@ -1,3 +1,374 @@
+<<<<<<< HEAD
+---
+title: "Project 2"
+author: "Daniel, Tom, Rachael"
+date: "Date"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+require("knitr")
+sourcedir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Source"
+datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Project/6021_Project2/"
+
+
+#sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
+#datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
+opts_knit$set(root.dir = sourcedir)
+library(forecast)
+library(imputeTS)
+library(ggplot2)
+library(ggfortify)
+library(mtsdi)
+library(forecast)
+library(lubridate)
+library(tidyverse)
+library(ggpubr)
+library(tseries)
+```
+
+# Load data and impute missing values
+```{r cars}
+setwd(datadir)
+
+airquality = read.csv('AirQualityUCI.csv')
+
+# replace -200 with NA
+airquality[airquality == -200] <- NA
+
+# convert integer type to numeric
+intcols = c(4,5,7,8,9,10,11,12)
+for(i in 1:length(intcols)){
+  airquality[,intcols[i]] <- as.numeric(airquality[,intcols[i]])
+}
+
+setwd(sourcedir)
+
+# create new data frame with just NO2 and impute missing values
+AQdata = airquality["NO2.GT."]
+AQdata = na_interpolation(AQdata)
+
+# aggregate to daily maxima for model building
+dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=max)
+
+# create time series of NO2
+NO2.ts <- ts(dailyAQ[,2])
+
+# create time series of NO2 without the last 7 days. (I added this)
+dailyAQ.7 <- dailyAQ[1:384,]
+NO2.7.ts <- ts(dailyAQ.7[,2])
+```
+
+1. Building Univariate Time Series Models: Build a time series model
+of daily maximum nitrogen dioxide (NO2) concentrations using all but
+the last 7 days of observations. Make sure to address the following items:
+(a) How you discovered and modeled any seasonal components, if applicable. (5 points)
+(b) How you discovered and modeled any trends, if applicable. (5 points)
+(c) How you determined autoregressive and moving average components,
+if applicable. (10 points)
+(d) How you assessed alternative models (e.g. adjusted R2, AIC, diagnostics, etc.). Assessments should discuss diagnostics and at least one metric. Show and discuss diagnostics of the residuals’ homoscedasticity, Gaussianity, and independence. What problems, if any, remain in the diagnostics of the selected model? (20 points)
+(e) Forecast the next 7 days of NO2 concentrations using your selected model. Plot the forecasts vs. true values. What is the MSE of the 7-day forecast? (10 points)
+
+```{r}
+# Build a time series model of daily maximum nitrogen dioxide (NO2) concentrations using all but the last 7 days of observations.
+# plot the time series
+autoplot(NO2.7.ts, ylab="Max NO2 Concentration", xlab="Day")
+# seems to be trending upwards and has an increasing variance over time.
+
+acf(NO2.7.ts)
+ggAcf(NO2.7.ts)
+# acf seems to show a decay over time. Each lag in acf and pacf are significant though and never cut off.
+# this tells us that there could be some seasonality maybe?
+
+# Next, model the trend of the concentrations.
+time.no2<-c(1:(length(NO2.7.ts)))
+
+#Build a new model, spam.trend which predicts spam.ts based on the time variable, time.spam
+no27.trend<-lm(NO2.7.ts~time.no2)
+
+##use the summary() command on spam.trend. Is time significant in predicting no2 frequency? yes, it is!
+summary(no27.trend)
+
+plot(NO2.7.ts) #linear model
+#abline(no2.7.trend,col='red')
+# Seems to be an upward trend over time
+
+# Get the periodogram for NO2.7.ts
+pg.no27 <- spec.pgram(NO2.7.ts,spans=9,demean=T,log='no')
+#spans is ban width, demean is subtract the mean, and log means
+# no log transform on the y-axis
+#for plotting in ggplot below
+spec.no27 <- data.frame(freq=pg.no27$freq, spec=pg.no27$spec)
+ggplot(spec.no27) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of NO2 Concenctrations")
+
+# There is clearly a peak at the beginning
+# Where is the peak?
+max.omega.no27<-pg.no27$freq[which(pg.no27$spec==max(pg.no27$spec))]
+
+# Where is the peak?
+max.omega.no27
+# 0.005208333
+# What is the period?
+1/max.omega.no27
+# period of 192
+```
+```{r}
+#*****************************
+# 
+# Model Trend and Seasonality  
+# 
+#*****************************
+no27.trend<-lm(NO2.7.ts ~ time.no2)
+
+# Use the summary() command on temp.trend,
+# Is time significant in predicting Richmond minimum temperature?
+summary(no27.trend)
+# temp coefficeient is not statistically significant, 
+#intercept would be the average at time =0
+# no, this isn't good enough to see a tredn though
+# because we need to account for seasonality
+
+# Plot no27.trend model
+ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() +
+  stat_smooth(method="lm",col="red") + xlab("") + ylab("Richmond Tmin")
+
+# Model diagnostics for no27.trend
+autoplot(no27.trend, labels.id = NULL)
+    
+# Are there any issues with the diagnostic plots for the no27.trend model?
+
+# Model seasonality
+no27.trend.seasonal <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/12) + cos(2*pi*time.no2/12))
+summary(no27.trend.seasonal)
+# now we know concentration is significant and it is positive. Note the cos term is not significant though.
+# Plot no27.trend.seasonal model
+ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
+  geom_line(aes(x=Group.1,y=no27.trend.seasonal$fitted.values),color="red") 
+
+#lung box, assumptions of independent residuals, then suggest more terms than 6 lags ago to capture correlation or maybe there's a missing moving average
+
+# Get the residuals from the temp.trend.seasonal model above and store in e.ts.temp:
+e.ts.no27 <- ts(no27.trend.seasonal$residuals)
+    
+# Plot the residuals for the temp.trend model
+autoplot(e.ts.no27)
+# we want it to have an average mean of constant 0
+# it is close, but there still is some non-independence
+# that we need to capture as well. There seems to be a dip in the middle
+
+# Plot the autocorrelation (ACF) of the residuals of temp.trend.seasonal
+no27.acf <- ggAcf(e.ts.no27)
+no27.acf
+# several lags are significant, there is some sinosoidal
+# behavior but it doesn't cut off so look at PACF
+
+# Plot the partial autocorrelation (PACF) of the residuals temp.trend.seasonal
+no27.pacf <- ggPacf(e.ts.no27)
+no27.pacf
+# also has sinosoidal behavior and doesn't cut off
+# which suggests we may have autoregressive and moving average terms
+# Does this time series still have structure to be modeled?
+# Probably, we could have some autoregressive terms to be examined.
+# Choose p and q terms for e.ts.temp based on the acf and pacf. Doesn't seem to have linear decay so no need to check differencing terms but will check a first order differencing to be sure.
+no27.diff.acf <- ggAcf(diff(e.ts.no27))
+no27.diff.pacf <- ggPacf(diff(e.ts.no27))
+ggarrange(no27.diff.acf,no27.diff.pacf,nrow=2,ncol=1)
+# These appear to be worse, so we were right.
+
+# therefore, the fact that ARMA has best aic seems to show that
+# our hypothesis that it has autoregressive and moving average terms
+#use automated selection method to see what p and q values are the best
+
+# using arima() function to find best p, q, and d values
+no27.auto <- auto.arima(e.ts.no27, approximation= FALSE)
+summary(no27.auto)
+#(2, 0, 1) (p, d, q), 
+# aic = 3786.9
+```
+```{r}
+# Examining based off of TS3 lecture:
+
+# ar(1) p=1
+no27.ar1 <- arima(e.ts.no27, order=c(1,0,0), include.mean=FALSE)
+summary(no27.ar1)     #3793.49
+
+# ma(2) p=0, q=2
+no27.ma2 <- arima(e.ts.no27, order=c(0,0,2), include.mean=FALSE)
+summary(no27.ma2)     #3827.75
+
+# arma(1,2) p=1, q=2
+no27.arma12 <- arima(e.ts.no27, order=c(1,0,2), include.mean=FALSE)
+summary(temp.arma12)     #3815.84
+
+# auto from above
+summary(no27.auto)     #3786.9
+# Based on AIC, no27.auto appears to be the best
+
+# BIC (penalizes additional terms more)
+BIC(no27.ar1)     #3801.388
+BIC(no27.ma2)     #3839.602
+BIC(no27.arma12)     #3803.168
+BIC(no27.auto)     #3802.705
+# Based on BIC. no27.ar1 is the best with no27.auto being a close 2nd
+
+
+```
+```{r}
+# assess residuals vs. fitted
+model1 = ggplot() + geom_point(aes(x=fitted(no27.ar1), y=no27.ar1$residuals)) + ggtitle("AR1")
+model2 = ggplot() + geom_point(aes(x=fitted(no27.ma2), y=no27.ma2$residuals)) + ggtitle("MA2")
+model3 = ggplot() + geom_point(aes(x=fitted(no27.arma12), y=no27.arma12$residuals)) + ggtitle("ARMA12")
+model4 = ggplot() + geom_point(aes(x=fitted(no27.auto), y=no27.auto$residuals)) + ggtitle("Auto")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+# all seem to have constant mean of zero, no significant differences
+
+
+# assess normality of residuals
+model1 = qplot(sample=no27.ar1$residuals) + stat_qq_line(color="red") + ggtitle("AR1")
+model2 = qplot(sample=no27.ma2$residuals) + stat_qq_line(color="red") + ggtitle("MA2")
+model3 = qplot(sample=no27.arma12$residuals) + stat_qq_line(color="red") + ggtitle("ARMA12")
+model4 = qplot(sample=no27.auto$residuals) + stat_qq_line(color="red") + ggtitle("Auto")
+
+ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
+# all look roughly the same and pretty good, looks pretty gaussian
+# so we're now mostly interested in seeing if our residuals are independent
+
+# Plot diagnostics for independence of residuals using tsdiag()
+ggtsdiag(no27.ar1,gof.lag=20)
+# good for up to 6 lags
+ggtsdiag(no27.ma2,gof.lag=20)
+# up to 1 lag
+ggtsdiag(no27.arma12,gof.lag=20)
+# about 6 lags
+ggtsdiag(no27.auto,gof.lag=20)
+# good for 6 lags
+
+# no27arma12, no27.auto, and no27.ar1 are the most adequate, while
+# no27.ma2 isn't great
+
+# Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.auto
+no27.auto.resid.acf <- ggAcf(no27.auto$residuals)
+no27.auto.resid.pacf <- ggPacf(no27.auto$residuals)
+ggarrange(no27.auto.resid.acf, no27.auto.resid.pacf,nrow=2,ncol=1)
+
+# The temp.auto model accounts for correlation in the residuals
+
+# Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.arma12
+no27.arma12.resid.acf <- ggAcf(no27.arma12$residuals)
+no27.arma12.resid.pacf <- ggPacf(no27.arma12$residuals)
+ggarrange(no27.arma12.resid.acf, no27.arma12.resid.pacf,nrow=2,ncol=1)
+# Does account for the correlation in the residuals.
+
+# Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.arma12
+no27.ar1.resid.acf <- ggAcf(no27.ar1$residuals)
+no27.ar1.resid.pacf <- ggPacf(no27.ar1$residuals)
+ggarrange(no27.ar1.resid.acf, no27.ar1.resid.pacf,nrow=2,ncol=1)
+# Does account for the correlation in the residuals.
+
+# Plot the best model's fitted values vs. true values
+# Since the best AR model has p=1, we start predicting at t=2
+Tmin.fitted <- no27.trend.seasonal$fitted.values + fitted(no27.auto)
+
+ggplot() + geom_line(aes(x=time.no2,y=NO2.7.ts[1:length(time.no2)],color="True")) +
+  geom_line(aes(x=time.no2,y=Tmin.fitted,color="Fitted")) + xlab("Time") + 
+  ylab("Richmond Tmin")
+# Looks pretty good, some of the peaks are off, but the patterns are similar.
+```
+
+```{r}
+# Forecasting the next 7 days with the best model: (using auto for now)
+
+no27.auto.forecast <- forecast(no27.auto, h=7)
+autoplot(no27.auto.forecast, main="Forecasts from ARIMA(2,0,1) with zero mean")
+
+# The actual time series for the period including the last week is NO2.ts
+# Prediction for the next week by no27.auto:
+next.wk.time <- c((length(NO2.ts)-6):(length(NO2.ts)))
+
+next.wk <- data.frame(time.no2 = next.wk.time, no27 = NO2.ts[next.wk.time])
+
+# The actual time series for the test period
+next.wk.ts <- NO2.ts[next.wk.time]
+next.wk.ts <- ts(next.wk$no27)
+
+E_Y.pred <- predict(no27.trend.seasonal, newdata=next.wk)
+e_t.pred <- forecast(no27.auto, h=7)
+next.wk.prediction <- E_Y.pred + e_t.pred$mean
+
+# MSE:
+
+mean((next.wk.prediction - next.wk$no27)^2)     #650.7591
+# come back, I think I did this part wrong
+
+# Plot actual values and predicted values
+plot(ts(next.wk$no27),type='o', ylim=c(130,280))
+lines(ts(next.wk.prediction),col='red',type='o')
+lines(1:7, E_Y.pred + e_t.pred$lower[,2], col = "red", lty = "dashed")
+lines(1:7, E_Y.pred + e_t.pred$upper[,2], col = "red", lty = "dashed")
+#legend(1,200, legend = c("Actual", "Predicted"), lwd = 2, col = c("black", "red")) 
+
+# Note: Can repeat this process with other models as needed.
+length(NO2.ts[next.6mo.time])
+
+```
+
+# End of part 1!
+
+2. Simulating Univariate Time Series Models: Simulate a year of synthetic observations of daily maximum nitrogen dioxide (NO2) concentrations from your selected model. Set the seed so you will get the same
+results each time. You will need to consider the sum of the linear models
+of the trend + seasonality, and the residual models. Assess and compare
+the model’s performance with respect to: (50 points)
+
+(a) Ability to reproduce appearance of time series. Plot observations and
+simulations and visually compare their characteristics. (10 points)
+
+(b) Ability to reproduce observed trends. You can assess this by building
+a linear model of the trend + seasonality of the simulations and comparing the coefficient estimates with the linear model of the trend +
+seasonality of the observations. What is the percent difference in the
+coefficient on time? (10 points)
+
+(c) Ability to reproduce seasonality of the time series. Analysis can be
+visual, simply comparing the periodogram of the observations and
+simulations. (10 points)
+
+(d) Ability to reproduce observed mean and variance of the time series
+(Hint: Use the functions ‘mean(ts)’ and ‘var(ts)’ where ts is a time
+series, and find the percent difference between observations and simulations) (10 points)
+
+(e) Ability to reproduce the autocorrelation of the time series. Analysis
+can be visual, simply comparing the ACF and PACF of the observations and simulations. (10 points)
+
+```{r}
+# Simulate a year of daily maximum NO2 concentrations with the best model
+set.seed(1)
+auto.sim <- arima.sim(n=365, list(ar=c(no27.auto$coef[1],no27.auto$coef[2]),
+                                      ma=c(no27.auto$coef[3])),
+                        sd=sqrt(no27.auto$sigma2))
+
+# Add mean predictions and plot simulation of Tmax concentrations
+next.yr.time <- c(1:(365))
+next.yr <- data.frame(time.no27 = next.yr.time)
+
+next.yr.predictions <- predict(no27.trend.seasonal, newdata=next.yr)
+
+# plot simulated temperatures
+autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum COncentrations")
+
+# Next, look at periodogram
+sim.ts <- next.yr.predictions + auto.sim
+
+spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
+spec.pgram(sim.ts,spans=9,demean=T,log='no')
+
+
+
+```
+
+=======
 ---
 title: "Project 2"
 author: "Daniel, Tom, Rachael"
@@ -367,3 +738,4 @@ spec.pgram(sim.ts,spans=9,demean=T,log='no')
 
 ```
 
+>>>>>>> 7756e8dc0d4d3480722e1856223803a3bb065e1d
