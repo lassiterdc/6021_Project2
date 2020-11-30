@@ -24,7 +24,7 @@ library(imputeTS)
 library(ggplot2)
 library(ggpubr)
 library(ggbiplot)
-library(ggfortify)
+# library(ggfortify)
 library(ggResidpanel)
 library(MASS)
 library(forecast)
@@ -38,9 +38,10 @@ library(here)
 library(tsibble)
 library(feasts)
 library(fable)
+library(dplyr)
 
 sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
-datadir <- paste0(here(), "/")
+datadir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/6021_Project2/"
 
 setwd(sourcedir)
 
@@ -79,7 +80,7 @@ AQdata = na_interpolation(AQdata)
 # aggregate to daily maxima for model building
 dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), 
                      FUN=max) %>% as_tsibble(index = Group.1) %>%
-          rename("Date" = "Group.1") %>% rename("NO2" = "NO2.GT.")
+          dplyr::rename("Date" = "Group.1") %>% dplyr::rename("NO2" = "NO2.GT.")
 
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
@@ -129,7 +130,7 @@ dailyAQ %>% PACF(NO2) %>% autoplot() + ggtitle("Nitrogen Concentration PACF plot
 * The PACF decreases from the 1st to the 2nd lag and becomes insignificant at the 4th lag. 
   * This indicates that our AR component should be order 3. (?)
 * Significant lags also occur after the 4th lag.
-* The plot may show some seasonality.
+* The plot may show some sinusoidal behavior.
   * If this is the case, then there would be a moving average term. However, 
   the ACF doesn't cut off so it's likely it is an AR(3) model only.
 
@@ -185,13 +186,13 @@ models <- dailyAQ_train %>%
 
 ### Trend
 ```{r}
-models %>% select(trend) %>% report()
+models %>% dplyr::select(trend) %>% report()
 ```
 The coefficient on trend is significant, and plotting the modeled trend line 
 against the original data below verifies this.
 
 ```{r}
-models %>% select(trend) %>% fitted() %>%
+models %>% dplyr::select(trend) %>% fitted() %>%
   autoplot(color = 'red') + autolayer(dailyAQ_train) +
         ggtitle("Trend Model") + ylab("NO2 mg/m^3") + xlab("") + my_theme
 ```
@@ -203,9 +204,9 @@ shows that the trend is still significant. The 3 week and 4 week coefficients
 
 
 ```{r}
-models %>% select(trend_season_w_wkday_dummy) %>% report()
+models %>% dplyr::select(trend_season_w_wkday_dummy) %>% report()
 
-models %>% select(trend_season_w_wkday_dummy) %>% fitted() %>%
+models %>% dplyr::select(trend_season_w_wkday_dummy) %>% fitted() %>%
   autoplot(color = 'red') + autolayer(dailyAQ_train) +
         ggtitle("Trend-Season Model with Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
 ```
@@ -220,10 +221,10 @@ significant once the seasonality component has been accounted for.
 The models reported in the summary and plot below had trigonometric functions 
 to model 7 day and 30 day seasonal components.
 ```{r}
-models %>% select(trend_season_7, trend_season_30) %>% coef()
+models %>% dplyr::select(trend_season_7, trend_season_30) %>% coef()
 
 models %>% 
-  select(trend_season_7, trend_season_30) %>% 
+  dplyr::select(trend_season_7, trend_season_30) %>% 
   fitted() %>% autoplot() +
   autolayer(dailyAQ_train) + 
   ggtitle("Trend-Season Model with Trigonometric Functions") + 
@@ -235,8 +236,8 @@ the models with a trend and seasonal component.
 
 ```{r}
 models %>% 
-  select(trend_season_7, trend_season_30, trend_season_w_wkday_dummy) %>% 
-  report() %>% select(.model, adj_r_squared, AIC, BIC, df.residual)
+  dplyr::select(trend_season_7, trend_season_30, trend_season_w_wkday_dummy) %>% 
+  report() %>% dplyr::select(.model, adj_r_squared, AIC, BIC, df.residual)
 ```
 
 The third model in the list which was built with day-of-the-week dummy variables
@@ -248,9 +249,9 @@ Next I tried modeling the seasonal component with a single dummy variable
 for whether the date was on a weekday or weekend.
 
 ```{r}
-models %>% select(trend_season_w_wknd_dummy) %>% report()
+models %>% dplyr::select(trend_season_w_wknd_dummy) %>% report()
 
-models %>% select(trend_season_w_wknd_dummy) %>% fitted() %>%
+models %>% dplyr::select(trend_season_w_wknd_dummy) %>% fitted() %>%
   autoplot(color = 'red') + autolayer(dailyAQ_train) +
         ggtitle("Trend-Season Model with Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
 ```
@@ -259,13 +260,144 @@ Unsurprisingly, the variable was significant. Finally, to compare with the rest:
 
 ```{r}
 models %>% 
-  select(trend_season_7, trend_season_30, 
+  dplyr::select(trend_season_7, trend_season_30, 
          trend_season_w_wkday_dummy, trend_season_w_wknd_dummy) %>% 
-  report() %>% select(.model, adj_r_squared, AIC, BIC, df.residual)
+  report() %>% dplyr::select(.model, adj_r_squared, AIC, BIC, df.residual)
 
 ```
 
 
-The model with the weekend/weekdaay dummy variable performed best across all 
+The model with the weekend/weekday dummy variable performed best across all 
 metrics except for the residuals, but the difference there is small. This is
 how I will model seasonality for the remainder of this analysis.
+
+
+
+
+### Modeling the residuals
+```{r}
+data_resids <- models %>%
+  dplyr::select(trend_season_w_wkday_dummy, trend_season_w_wknd_dummy) %>% 
+  residuals()
+
+data_resids %>% dplyr::filter(.model == 'trend_season_w_wknd_dummy') %>% autoplot(.resid)
+```
+
+There is clearly some autocorrelation in the residuals.
+
+```{r}
+plt_resid_ACF <- data_resids %>%
+  dplyr::filter(.model == 'trend_season_w_wknd_dummy') %>%
+  ACF(.resid) %>% autoplot() + ggtitle("NO2 Residuals ACF plot") + my_theme
+
+plt_resid_PACF <- data_resids %>%
+  dplyr::filter(.model == 'trend_season_w_wknd_dummy') %>% 
+  PACF(.resid) %>% autoplot() + ggtitle("NO2 Residuals PACF plot") + my_theme
+
+ggarrange(plt_resid_ACF,plt_resid_PACF,nrow=2,ncol=1)
+```
+
+
+There is sinusoidal decay in the ACF of the residuals. The PACF could be
+interpreted as cutting off after lag 2 or as exhibiting sinusoidal behavior.
+This indicates that the residuals could be modeled as either AR(2) or as an ARMA
+process.
+
+
+
+```{r}
+# Model the residuals of the 2 best models
+models_residuals <- data_resids %>%
+  rename("model" = ".model", "resid" = ".resid") %>%
+  model(auto.arima = ARIMA(resid ~ PDQ(0,0,0)), 
+        ar2 = ARIMA(resid ~ pdq(2, 0, 0) + PDQ(0,0,0)))
+# Show the pdq values from the auto.arima models
+models_residuals %>% tidy() %>% filter(.model == 'auto.arima')
+
+# Compare AIC and BIC across the 4 models
+models_residuals %>% report() %>%
+  dplyr::select(model, .model, AIC, BIC)
+
+# Best model by AIC
+models_residuals %>% dplyr::select(auto.arima) %>%
+  filter(model == 'trend_season_w_wkday_dummy') %>%
+  report()
+
+# Best model by BIC
+models_residuals %>% dplyr::select(ar2) %>%
+  filter(model == 'trend_season_w_wkday_dummy') %>%
+  report()
+
+# Plot residuals vs. fitted
+models_residuals_fitted <-
+  models_residuals %>% fitted() %>% as_tibble() %>% dplyr::select(Date, '.fitted')
+
+models_residuals_resid <- 
+  models_residuals %>% residuals() %>% as_tibble()
+
+model_residuals_fittedAndResiduals <- 
+  inner_join(models_residuals_resid, models_residuals_fitted, by = "Date")
+
+ggplot(model_residuals_fittedAndResiduals, aes(.fitted, .resid)) +
+    geom_point() + facet_grid(rows = vars(model), cols = vars(.model))
+
+# Plot QQ plots
+ggplot(model_residuals_fittedAndResiduals, aes(sample = .resid)) +
+    stat_qq() + stat_qq_line(color = "red") + 
+    facet_grid(rows = vars(model), cols = vars(.model))
+```
+
+I decide to work with the weekend auto.arima model.
+
+# ***Struggling with Ljung-box test
+```{r}
+model_auto.arima_wknd_dummies <- models_residuals %>% filter(model == 'trend_season_w_wknd_dummy') %>%
+  dplyr::select(auto.arima)
+
+# Inspecting residuals:
+model_auto.arima_wknd_dummies %>% gg_tsresiduals()
+
+model_auto.arima_wknd_dummies %>% augment()
+
+models_residuals %>% augment() %>% features(.resid, ljung_box, lag = 20, dof = 2)
+
+```
+
+The automatic selection process chose 2 autoregressive terms and 1 moving average
+term for both sets of model residuals (from the weekday-dummy-variables model
+and the weekend-dummy-variables model). Interestingly, the model with the lowest
+AIC was the ARMA(2, 1) of the weekday-dummy-variables model residuals and the
+model with the lowest BIC was the AR(2) of the weekday-dummy-variables model residuals.
+
+The residuals vs. fitted plot doesn't show a pattern in the residuals for any 
+of the models, nor does the QQ plot.
+
+The next step is to add in the ARMA models to the original models. Then we'll
+have another performance comparison.
+
+### Forecasting residuals
+```{r}
+fitted <- models_residuals %>% filter(model == 'trend_season_w_wknd_dummy') %>% augment() %>%
+  dplyr::select(.fitted) %>% update_tsibble(key = .model)
+
+models_residuals %>% filter(model == 'trend_season_w_wknd_dummy') %>%
+  forecast(h = "1 week") %>% feasts::autoplot(alpha = 0.9) +
+  autolayer(fitted) + ggtitle("Forecast ")
+
+```
+
+
+
+### Model trend, seasonality, and autocorrelation of residuals
+```{r}
+
+
+```
+
+
+
+
+
+
+
+
