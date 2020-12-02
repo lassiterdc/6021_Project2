@@ -77,8 +77,10 @@ if applicable. (10 points)
 autoplot(NO2.7.ts, ylab="Max NO2 Concentration", xlab="Day")
 # seems to be trending upwards and has an increasing variance over time.
 
-acf(NO2.7.ts)
-ggAcf(NO2.7.ts)
+oacf <- ggAcf(NO2.7.ts)
+opacf <- ggPacf(NO2.7.ts)
+oacf
+opacf
 # acf seems to show a decay over time. Each lag in acf and pacf are significant though and never cut off.
 # this tells us that there could be some seasonality maybe?
 
@@ -152,7 +154,6 @@ ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() +
 # Model diagnostics for no27.trend
 autoplot(no27.trend, labels.id = NULL)
     
-# Are there any issues with the diagnostic plots for the no27.trend model?
 
 # Model seasonality, looking at different values from the peak. (# Outputs: 192, 128, 384, 96, 76.8, 64, 54.9, 48, 42.7, 38.4)
 no27.trend.seasonal1 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192))
@@ -257,8 +258,8 @@ no27.acf
 
 # Plot the partial autocorrelation (PACF) of the residuals temp.trend.seasonal
 no27.pacf <- ggPacf(e.ts.no27)
-no27.pacf
-# also has sinosoidal behavior and doesn't cut off? (define cutoff)
+no27.pacf     
+# also has sinosoidal behavior and doesn't cut off
 # which suggests we may have autoregressive and moving average terms
 
 # We could have some autoregressive terms to be examined.
@@ -281,9 +282,9 @@ summary(no27.auto)
 ```{r}
 # Examining based off of TS3 lecture:
 
-# ar(1) p=1
+# ar(2) p=2 (try 2 because auto has 1)
 no27.ar1 <- arima(e.ts.no27, order=c(2,0,0), include.mean=FALSE)
-summary(no27.ar1)     #3793.49
+summary(no27.ar1)     #3709.15
 
 # ma(2) p=0, q=2
 no27.ma2 <- arima(e.ts.no27, order=c(0,0,2), include.mean=FALSE)
@@ -291,7 +292,7 @@ summary(no27.ma2)     #3712.34
 
 # arma(1,2) p=1, q=2
 no27.arma12 <- arima(e.ts.no27, order=c(1,0,2), include.mean=FALSE)
-summary(temp.arma12)     #3815.84
+summary(no27.arma12)     #3710.73
 
 # auto from above
 summary(no27.auto)     #3707.15
@@ -344,19 +345,19 @@ no27.auto.resid.acf <- ggAcf(no27.auto$residuals)
 no27.auto.resid.pacf <- ggPacf(no27.auto$residuals)
 ggarrange(no27.auto.resid.acf, no27.auto.resid.pacf,nrow=2,ncol=1)
 
-# The no27.auto model accounts for correlation in the residuals
+# The no27.auto model accounts for correlation in the residuals, 5
 
 # Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.arma12
 no27.arma12.resid.acf <- ggAcf(no27.arma12$residuals)
 no27.arma12.resid.pacf <- ggPacf(no27.arma12$residuals)
 ggarrange(no27.arma12.resid.acf, no27.arma12.resid.pacf,nrow=2,ncol=1)
-# Does account for the correlation in the residuals.
+# Does account for the correlation in the residuals, about 5
 
 # Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.arma12
 no27.ar1.resid.acf <- ggAcf(no27.ar1$residuals)
 no27.ar1.resid.pacf <- ggPacf(no27.ar1$residuals)
 ggarrange(no27.ar1.resid.acf, no27.ar1.resid.pacf,nrow=2,ncol=1)
-# Does account for the correlation in the residuals.
+# Does account for the correlation in the residuals, about 5
 
 #3 Double check, how to tell if accounts for residuals 
 
@@ -401,8 +402,6 @@ lines(1:7, E_Y.pred + e_t.pred$upper[,2], col = "red", lty = "dashed")
 #legend(1,200, legend = c("Actual", "Predicted"), lwd = 2, col = c("black", "red")) 
 
 # Note: Can repeat this process with other models as needed.
-length(NO2.ts[next.6mo.time])
-
 ```
 
 # End of part 1!
@@ -437,21 +436,83 @@ set.seed(1)
 auto.sim <- arima.sim(n=365, list(ar=c(no27.auto$coef[1])), sd=sqrt(no27.auto$sigma2))
 # Add mean predictions and plot simulation of Tmax concentrations
 next.yr.time <- c(1:(365))
-next.yr <- data.frame(time.no27 = next.yr.time)
+next.yr <- data.frame(time.no2 = next.yr.time)
 
 next.yr.predictions <- predict(no27.trend.seasonal, newdata = next.yr)
-length(next.yr)
-# come bacl, change removal
 
 # plot simulated temperatures
 autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum Concentrations")
 
+# Now plot simulated vs actual
+sim =autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum Concentrations")
+act =autoplot(NO2.7.ts, xlab="Time", ylab="Actual NO2 level")
+
+ggarrange(sim, act ,nrow=2,ncol=1)
+
 # Next, look at periodogram
 sim.ts <- next.yr.predictions + auto.sim
+as <- pg.no27 #actual periodogram formed earlier
+ps <- spec.pgram(sim.ts,spans=9,demean=T,log='no')
 
-spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
-spec.pgram(sim.ts,spans=9,demean=T,log='no')
+spec.no27 <- data.frame(freq=pg.no27$freq, spec=pg.no27$spec)
+ggplot(spec.no27) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of NO2 Concenctrations")
+pspec.no27 <- data.frame(freq=ps$freq, spec=ps$spec)
+ggplot(pspec.no27) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of Predicted NO2 Concenctrations")
+```
 
+```{r}
+# Model the simulated data and see how the trend, seasonality, and residuals look.
+sim <- as.numeric(sim.ts)
 
+simno27.ts <- lm(sim~next.yr.time+sin(2*pi*next.yr.time/192)
+                    +cos(2*pi*next.yr.time/192)+sin(2*pi*next.yr.time/128)
+                    +cos(2*pi*next.yr.time/128)+sin(2*pi*next.yr.time/76.8)
+                    +cos(2*pi*next.yr.time/76.8)+sin(2*pi*next.yr.time/64)
+                    +cos(2*pi*next.yr.time/64)+sin(2*pi*next.yr.time/64)
+                    +cos(2*pi*next.yr.time/64)+sin(2*pi*next.yr.time/7)
+                    +cos(2*pi*next.yr.time/7)+sin(2*pi*next.yr.time/30)
+                    +cos(2*pi*next.yr.time/30)+sin(2*pi*next.yr.time/365)
+                    +cos(2*pi*next.yr.time/365))
+
+summary(simno27.ts)     # Each has at least one significant trig term again.
+AIC(simno27.ts)     #3556.824
+
+no27.trend.seasonal$coefficients[2]
+simno27.ts$coefficients[2]
+
+# Look at the differences in the first coefficient (ignore intercept here)
+abs(no27.trend.seasonal$coefficients[2]-simno27.ts$coefficients[2])/no27.trend.seasonal$coefficients[2]     #1.018155 
+
+ggplot(sim.ts, aes(x=next.yr.time,y=sim)) + geom_line() +   geom_line(aes(x=next.yr.time,y=simno27.ts$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+```{r}
+# Use the functions ‘mean(ts)’ and ‘var(ts)’ where ts is a time series, and find the percent difference between observations and simulations.
+
+# Means
+a <- mean(sim.ts)
+b <- mean(NO2.7.ts)
+abs(b-a)/b     #0.00423076
+
+# Variances
+c <- var(sim.ts)
+d <- var(NO2.7.ts)
+abs(d-c)/d     #0.1139395
+
+```
+```{r}
+# Compare the ACF and PACF of the observations and simulations
+sim.res <- simno27.ts$residuals
+sim.res.ts <- ts(sim.res)
+
+sim.res.acf <- ggAcf(sim.res.ts)
+sim.res.pacf <- ggPacf(sim.res.ts)
+
+ggarrange(oacf, sim.res.acf, opacf, sim.res.pacf, nrow=2, ncol=2)
+
+# ACF looks very different, pacf looks more similar
 ```
 
