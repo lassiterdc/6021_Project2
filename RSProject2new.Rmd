@@ -84,7 +84,7 @@ ggAcf(NO2.7.ts)
 
 # Next, model the trend of the concentrations.
 time.no2<-c(1:(length(NO2.7.ts)))
-
+time.no27<-c(1:(365))
 #Build a new model, spam.trend which predicts spam.ts based on the time variable, time.spam
 no27.trend<-lm(NO2.7.ts~time.no2)
 
@@ -114,6 +114,20 @@ max.omega.no27
 # What is the period?
 1/max.omega.no27
 # period of 192
+
+# Are there any other peaks that we could try and consider in the model?
+sorted.spec <- sort(pg.no27$spec, decreasing=T, index.return=T)
+names(sorted.spec)
+
+# corresponding periods (omegas = frequences, Ts = periods)
+sorted.omegas <- pg.no27$freq[sorted.spec$ix]
+sorted.Ts <- 1/pg.no27$freq[sorted.spec$ix]
+
+# look at first 20
+sorted.omegas[1:20]
+sorted.Ts[1:20]
+
+# Outputs: 192, 128, 384, 96, 76.8, 64, 54.9, 48, 42.7, 38.4
 ```
 ```{r}
 #*****************************
@@ -140,19 +154,90 @@ autoplot(no27.trend, labels.id = NULL)
     
 # Are there any issues with the diagnostic plots for the no27.trend model?
 
-# Model seasonality
-no27.trend.seasonal <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/12) + cos(2*pi*time.no2/12))
-summary(no27.trend.seasonal)
-no27.trend.seasonal2 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/7) + cos(2*pi*time.no2/7) + sin(2*pi*time.no2/365) + cos(2*pi*time.no2/365))
+# Model seasonality, looking at different values from the peak. (# Outputs: 192, 128, 384, 96, 76.8, 64, 54.9, 48, 42.7, 38.4)
+no27.trend.seasonal1 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192))
+summary(no27.trend.seasonal1)
+AIC(no27.trend.seasonal1)
+# 1 is significant and positive, AIC of 4000.19
+
+# Try including another term, 128
+no27.trend.seasonal2 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128))
+summary(no27.trend.seasonal2)
+AIC(no27.trend.seasonal2)
+# All trig terms are significant, AIC of 3984.142. Therefore, this one is better than the prior.
+
+# Try including a third, 384
+no27.trend.seasonal3 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/384) + cos(2*pi*time.no2/384))
+summary(no27.trend.seasonal3)
+AIC(no27.trend.seasonal3)
+# All trig terms are significant again, AIC of 3912.906. Therefore the 2nd is still the best.
+
+# Try a different third term, 96.
+no27.trend.seasonal4 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/96) + cos(2*pi*time.no2/96))
+summary(no27.trend.seasonal4)
+AIC(no27.trend.seasonal4)
+# The 96 trig terms are not significant, and AIC of 3985.905, so it's closer than the prior. 
+
+# Try another from the list as a 3rd, 76.8
+no27.trend.seasonal5 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8))
+summary(no27.trend.seasonal5)
+AIC(no27.trend.seasonal5)
+# Each one has 1 significant trig term, AIC of 3961.554. This is now our best.
+
+# Try adding a fourth term, 64
+no27.trend.seasonal6 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64))
+summary(no27.trend.seasonal6)
+AIC(no27.trend.seasonal6)
+# Each has at least 1 significant trig term, AIC of 3925.592, our new best.
+
+# Try adding a fifth term, 54.9
+no27.trend.seasonal7 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+sin(2*pi*time.no2/54.9) + cos(2*pi*time.no2/54.9))
+summary(no27.trend.seasonal7)
+AIC(no27.trend.seasonal7)
+# Not every term has at least 1 significant trig.
+
+# Try a different fifth term, 48
+no27.trend.seasonal8 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+sin(2*pi*time.no2/48) + cos(2*pi*time.no2/48))
+summary(no27.trend.seasonal8)
+AIC(no27.trend.seasonal8)
+# Not every term has at least 1 significant trig.
+
+# Try a different fifth term, 42.7
+no27.trend.seasonal9 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+sin(2*pi*time.no2/42.7) + cos(2*pi*time.no2/42.7))
+summary(no27.trend.seasonal9)
+AIC(no27.trend.seasonal9)
+# Not every term has at least 1 significant trig.
+
+# Try a different fifth term, 38.4
+no27.trend.seasonal10 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+sin(2*pi*time.no2/38.4) + cos(2*pi*time.no2/38.4))
+summary(no27.trend.seasonal10)
+AIC(no27.trend.seasonal10)
+# Not every term has at least 1 significant trig. Therefore, the 6th is still the best. 
+
+# We'll try another variation of the 6th with possible patterns we can think of, how about 30, 7, and 365 (months, weeks, and years)
+no27.trend.seasonal6.2 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+ sin(2*pi*time.no2/7) + cos(2*pi*time.no2/7))
+summary(no27.trend.seasonal6.2)
+AIC(no27.trend.seasonal6.2)
+# With 7, all have at least 1 significant trig term, and the lowest AIC pf 3895.892
+
+# Try adding 30 to the above.
+no27.trend.seasonal6.2.2 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+ sin(2*pi*time.no2/7) + cos(2*pi*time.no2/7)+sin(2*pi*time.no2/30) + cos(2*pi*time.no2/30))
+summary(no27.trend.seasonal6.2.2)
+AIC(no27.trend.seasonal6.2.2)
+# With 30, all have at least 1 significant trig term, with the best AIC of 3889.858.
+
+# Try adding 365 to the above.
+no27.trend.seasonal6.2.2.2 <- lm(NO2.7.ts ~ time.no2 + sin(2*pi*time.no2/192) + cos(2*pi*time.no2/192) + sin(2*pi*time.no2/128) + cos(2*pi*time.no2/128)+ sin(2*pi*time.no2/76.8) + cos(2*pi*time.no2/76.8)+ sin(2*pi*time.no2/64) + cos(2*pi*time.no2/64)+ sin(2*pi*time.no2/7) + cos(2*pi*time.no2/7)+sin(2*pi*time.no2/30) + cos(2*pi*time.no2/30)+sin(2*pi*time.no2/365) + cos(2*pi*time.no2/365))
+summary(no27.trend.seasonal6.2.2.2)
+AIC(no27.trend.seasonal6.2.2.2)
+# With 30, all have at least 1 significant trig term, with the best AIC of 3804.863
+# Let's use model 6.2.2.2, we will rename it to 
+no27.trend.seasonal <-
+  no27.trend.seasonal6.2.2.2
 # now we know concentration is significant and it is positive. Note the cos term is not significant though.
 # Plot no27.trend.seasonal model
 ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
   geom_line(aes(x=Group.1,y=no27.trend.seasonal$fitted.values),color="red") 
-
-ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
-  geom_line(aes(x=Group.1,y=no27.trend.seasonal2$fitted.values),color="red") 
-
-#lung box, assumptions of independent residuals, then suggest more terms than 6 lags ago to capture correlation or maybe there's a missing moving average
 
 # Get the residuals from the temp.trend.seasonal model above and store in e.ts.temp:
 e.ts.no27 <- ts(no27.trend.seasonal$residuals)
@@ -162,21 +247,21 @@ autoplot(e.ts.no27)
 
 # we want it to have an average mean of constant 0
 # it is close, but there still is some non-independence
-# that we need to capture as well. There seems to be a dip in the middle
+# that we need to capture as well. There seems to be some inconsistent extremes
 
 # Plot the autocorrelation (ACF) of the residuals of temp.trend.seasonal
 no27.acf <- ggAcf(e.ts.no27)
 no27.acf
 # several lags are significant, there is some sinosoidal
-# behavior but it doesn't cut off so look at PACF
+# behavior, look at PACF next
 
 # Plot the partial autocorrelation (PACF) of the residuals temp.trend.seasonal
 no27.pacf <- ggPacf(e.ts.no27)
 no27.pacf
-# also has sinosoidal behavior and doesn't cut off
+# also has sinosoidal behavior and doesn't cut off? (define cutoff)
 # which suggests we may have autoregressive and moving average terms
-# Does this time series still have structure to be modeled?
-# Probably, we could have some autoregressive terms to be examined.
+
+# We could have some autoregressive terms to be examined.
 # Choose p and q terms for e.ts.temp based on the acf and pacf. Doesn't seem to have linear decay so no need to check differencing terms but will check a first order differencing to be sure.
 no27.diff.acf <- ggAcf(diff(e.ts.no27))
 no27.diff.pacf <- ggPacf(diff(e.ts.no27))
@@ -190,35 +275,34 @@ ggarrange(no27.diff.acf,no27.diff.pacf,nrow=2,ncol=1)
 # using arima() function to find best p, q, and d values
 no27.auto <- auto.arima(e.ts.no27, approximation= FALSE)
 summary(no27.auto)
-#(2, 0, 1) (p, d, q), 
-# aic = 3786.9
+#(1, 0, 0) (p, d, q), 
+# aic = 3707.15
 ```
 ```{r}
 # Examining based off of TS3 lecture:
 
 # ar(1) p=1
-no27.ar1 <- arima(e.ts.no27, order=c(1,0,0), include.mean=FALSE)
+no27.ar1 <- arima(e.ts.no27, order=c(2,0,0), include.mean=FALSE)
 summary(no27.ar1)     #3793.49
 
 # ma(2) p=0, q=2
 no27.ma2 <- arima(e.ts.no27, order=c(0,0,2), include.mean=FALSE)
-summary(no27.ma2)     #3827.75
+summary(no27.ma2)     #3712.34
 
 # arma(1,2) p=1, q=2
 no27.arma12 <- arima(e.ts.no27, order=c(1,0,2), include.mean=FALSE)
 summary(temp.arma12)     #3815.84
 
 # auto from above
-summary(no27.auto)     #3786.9
+summary(no27.auto)     #3707.15
 # Based on AIC, no27.auto appears to be the best
 
 # BIC (penalizes additional terms more)
-BIC(no27.ar1)     #3801.388
-BIC(no27.ma2)     #3839.602
-BIC(no27.arma12)     #3803.168
-BIC(no27.auto)     #3802.705
-# Based on BIC. no27.ar1 is the best with no27.auto being a close 2nd
-
+BIC(no27.ar1)     #3721.001
+BIC(no27.ma2)     #3724.187
+BIC(no27.arma12)     #3726.529
+BIC(no27.auto)     #3715.053
+# Based on BIC. no27.auto is still the best 
 
 ```
 ```{r}
@@ -244,13 +328,13 @@ ggarrange(model1, model2, model3, model4, ncol=2, nrow=2)
 
 # Plot diagnostics for independence of residuals using tsdiag()
 ggtsdiag(no27.ar1,gof.lag=20)
-# good for up to 6 lags
+# good for up to 5 lags
 ggtsdiag(no27.ma2,gof.lag=20)
-# up to 1 lag
+# up to 2 lags
 ggtsdiag(no27.arma12,gof.lag=20)
 # about 6 lags
 ggtsdiag(no27.auto,gof.lag=20)
-# good for 6 lags
+# good for 4 lags
 
 # no27arma12, no27.auto, and no27.ar1 are the most adequate, while
 # no27.ma2 isn't great
@@ -260,7 +344,7 @@ no27.auto.resid.acf <- ggAcf(no27.auto$residuals)
 no27.auto.resid.pacf <- ggPacf(no27.auto$residuals)
 ggarrange(no27.auto.resid.acf, no27.auto.resid.pacf,nrow=2,ncol=1)
 
-# The temp.auto model accounts for correlation in the residuals
+# The no27.auto model accounts for correlation in the residuals
 
 # Plot the autocorrelation (ACF) and partial autocorrelation (PACF) of the residuals of no27.arma12
 no27.arma12.resid.acf <- ggAcf(no27.arma12$residuals)
@@ -274,13 +358,14 @@ no27.ar1.resid.pacf <- ggPacf(no27.ar1$residuals)
 ggarrange(no27.ar1.resid.acf, no27.ar1.resid.pacf,nrow=2,ncol=1)
 # Does account for the correlation in the residuals.
 
+#3 Double check, how to tell if accounts for residuals 
+
 # Plot the best model's fitted values vs. true values
-# Since the best AR model has p=1, we start predicting at t=2
 Tmin.fitted <- no27.trend.seasonal$fitted.values + fitted(no27.auto)
 
 ggplot() + geom_line(aes(x=time.no2,y=NO2.7.ts[1:length(time.no2)],color="True")) +
   geom_line(aes(x=time.no2,y=Tmin.fitted,color="Fitted")) + xlab("Time") + 
-  ylab("Richmond Tmin")
+  ylab("Max NO2 Concentrations")
 # Looks pretty good, some of the peaks are off, but the patterns are similar.
 ```
 
@@ -306,11 +391,10 @@ next.wk.prediction <- E_Y.pred + e_t.pred$mean
 
 # MSE:
 
-mean((next.wk.prediction - next.wk$no27)^2)     #650.7591
-# come back, I think I did this part wrong
+mean((next.wk.prediction - next.wk$no27)^2)     #345.7277
 
 # Plot actual values and predicted values
-plot(ts(next.wk$no27),type='o',ylim=c(150,300))
+plot(ts(next.wk$no27),type='o',ylim=c(110,300))
 lines(ts(next.wk.prediction),col='red',type='o')
 lines(1:7, E_Y.pred + e_t.pred$lower[,2], col = "red", lty = "dashed")
 lines(1:7, E_Y.pred + e_t.pred$upper[,2], col = "red", lty = "dashed")
@@ -350,25 +434,23 @@ can be visual, simply comparing the ACF and PACF of the observations and simulat
 ```{r}
 # Simulate a year of daily maximum NO2 concentrations with the best model
 set.seed(1)
-auto.sim <- arima.sim(n=365, list(ar=c(no27.auto$coef[1],no27.auto$coef[2]),
-                                      ma=c(no27.auto$coef[3])),
-                        sd=sqrt(no27.auto$sigma2))
-
+auto.sim <- arima.sim(n=365, list(ar=c(no27.auto$coef[1])), sd=sqrt(no27.auto$sigma2))
 # Add mean predictions and plot simulation of Tmax concentrations
 next.yr.time <- c(1:(365))
 next.yr <- data.frame(time.no27 = next.yr.time)
 
-next.yr.predictions <- predict(no27.trend.seasonal, newdata=next.yr)
+next.yr.predictions <- predict(no27.trend.seasonal, newdata = next.yr)
+length(next.yr)
+# come bacl, change removal
 
 # plot simulated temperatures
-autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum COncentrations")
+autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum Concentrations")
 
 # Next, look at periodogram
 sim.ts <- next.yr.predictions + auto.sim
 
 spec.pgram(dailyAQ.ts,spans=9,demean=T,log='no')
 spec.pgram(sim.ts,spans=9,demean=T,log='no')
-
 
 
 ```
