@@ -139,10 +139,10 @@ sorted.Ts[1:20]
 #*****************************
 no27.trend<-lm(NO2.7.ts ~ time.no2)
 
-# Use the summary() command on temp.trend,
-# Is time significant in predicting Richmond minimum temperature?
+# Use the summary() command on no27.trend,
+# Is time significant in predicting the maximum NO2 concentrations
 summary(no27.trend)
-# temp coefficeient is not statistically significant, 
+# concentration coefficeient is not statistically significant, 
 #intercept would be the average at time =0
 # no, this isn't good enough to see a tredn though
 # because we need to account for seasonality
@@ -240,30 +240,30 @@ no27.trend.seasonal <-
 ggplot(dailyAQ.7, aes(x=Group.1,y=NO2.GT.)) + geom_line() + 
   geom_line(aes(x=Group.1,y=no27.trend.seasonal$fitted.values),color="red") 
 
-# Get the residuals from the temp.trend.seasonal model above and store in e.ts.temp:
+# Get the residuals from the no27.trend.seasonal model above and store in e.ts.no27:
 e.ts.no27 <- ts(no27.trend.seasonal$residuals)
     
-# Plot the residuals for the temp.trend model
+# Plot the residuals for the no27.trend model
 autoplot(e.ts.no27)
 
 # we want it to have an average mean of constant 0
 # it is close, but there still is some non-independence
 # that we need to capture as well. There seems to be some inconsistent extremes
 
-# Plot the autocorrelation (ACF) of the residuals of temp.trend.seasonal
+# Plot the autocorrelation (ACF) of the residuals of no27.trend.seasonal
 no27.acf <- ggAcf(e.ts.no27)
 no27.acf
 # several lags are significant, there is some sinosoidal
 # behavior, look at PACF next
 
-# Plot the partial autocorrelation (PACF) of the residuals temp.trend.seasonal
+# Plot the partial autocorrelation (PACF) of the residuals no27.trend.seasonal
 no27.pacf <- ggPacf(e.ts.no27)
 no27.pacf     
-# also has sinosoidal behavior and doesn't cut off
+# also has sinusoidal behavior and doesn't cut off
 # which suggests we may have autoregressive and moving average terms
 
 # We could have some autoregressive terms to be examined.
-# Choose p and q terms for e.ts.temp based on the acf and pacf. Doesn't seem to have linear decay so no need to check differencing terms but will check a first order differencing to be sure.
+# Choose p and q terms for e.ts.no27 based on the acf and pacf. Doesn't seem to have linear decay so no need to check differencing terms but will check a first order differencing to be sure.
 no27.diff.acf <- ggAcf(diff(e.ts.no27))
 no27.diff.pacf <- ggPacf(diff(e.ts.no27))
 ggarrange(no27.diff.acf,no27.diff.pacf,nrow=2,ncol=1)
@@ -374,7 +374,7 @@ ggplot() + geom_line(aes(x=time.no2,y=NO2.7.ts[1:length(time.no2)],color="True")
 # Forecasting the next 7 days with the best model: (using auto for now)
 
 no27.auto.forecast <- forecast(no27.auto, h=7)
-autoplot(no27.auto.forecast,main="Forecasts from ARIMA(2,0,1) with zero mean")
+autoplot(no27.auto.forecast,main="Forecasts from AUTO(1,0,0) with zero mean")
 
 # The actual time series for the period including the last week is NO2.ts
 # Prediction for the next week by no27.auto:
@@ -440,13 +440,16 @@ next.yr <- data.frame(time.no2 = next.yr.time)
 
 next.yr.predictions <- predict(no27.trend.seasonal, newdata = next.yr)
 
-# plot simulated temperatures
+# plot simulated concentrations
 autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum Concentrations")
 
 # Now plot simulated vs actual
+dailyAQ.365 <- dailyAQ[1:365,]
+NO2.365.ts <- ts(dailyAQ.365[,2])
 sim =autoplot(ts(next.yr.predictions + auto.sim),xlab="Time",ylab="Simulated Daily Maximum Concentrations")
-act =autoplot(NO2.7.ts, xlab="Time", ylab="Actual NO2 level")
-
+act =autoplot(NO2.365.ts, xlab="Time", ylab="Actual NO2 level")
+act
+sim
 ggarrange(sim, act ,nrow=2,ncol=1)
 
 # Next, look at periodogram
