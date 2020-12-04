@@ -240,7 +240,7 @@ ggarrange(AQres.acf,AQres.pacf,nrow=2,ncol=1)
 From the ACF, the residuals may not be stationary. From the PACF, there are many
 that are significant: at 1, 3, 7, 12, and 15 (not sure about 2).
 
-The next step is to do an ARIMA model and see what comes out.
+The next step is to do an auto ARIMA model and see what comes out.
 
 ```{r}
 
@@ -366,7 +366,7 @@ AQdata.best.forecast <- forecast(AQres.303, h=7)
 
 plot(AQdata.best.forecast)
 
-next.7day.time <- c((length(dailyAQ.ts)-6):(length(dailyAQ.ts)))
+next.7day.time <- c(385:391)
 
 dailyAQ.all.ts <- ts(dailyAQ)
 
@@ -375,7 +375,7 @@ next.7day <- data.frame(time.NO2 = next.7day.time, NO2.GT. = NO2.ts[next.7day.ti
 
 # The actual time series for the test period
 next.7day.ts <- dailyAQ.ts[next.7day.time]
-next.7day.ts <- ts(next.7day$NO2.GT.)
+#next.7day.ts <- ts(next.7day$NO2.GT.)
 
 # Prediction for the next 7 days by ARIMA(3,0,3) model:
 E_Y.pred <- predict(NO2.ts.lm6, newdata=next.7day)
@@ -407,7 +407,7 @@ I want to redo that part with the auto.arima model as well and see how it did.
 
 ```{r}
 
-# Prediction for the next 7 days by ARIMA(3,0,3) model:
+# Prediction for the next 7 days by ARIMA(3,0,2) model:
 E_Y.pred <- predict(NO2.ts.lm6, newdata=next.7day)
 e_t.pred <- forecast(AQres.auto, h=7)
 next.7day.prediction <- E_Y.pred + e_t.pred$mean
