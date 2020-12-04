@@ -1,23 +1,63 @@
 ---
 title: "Project 2"
-author: "Group Members' Names"
-date: "Date"
+author: "Rachael Stryker, Tom Muhlbauer, and Daniel Lassiter"
+date: "12/4/2020"
 output:
-  pdf_document: default
-  html_document: default
+  pdf_document:
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 5
+    number_sections: true
+    theme: united
 ---
 
-```{r setup, include=FALSE}
-require("knitr")
-sourcedir <- "D:/GoogleDrive/Julie_SYS4021/Projects/TimeSeries2020"
-datadir <- "D:/GoogleDrive/Julie_SYS4021/Data Sets/AirQualityUCI"
-opts_knit$set(root.dir = sourcedir)
-library(forecast)
-library(imputeTS)
+```{r setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE, collapse = TRUE, fig.fullwidth=TRUE)
 ```
 
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(forecast)
+library(imputeTS)
+library(ggplot2)
+library(ggpubr)
+library(ggbiplot)
+# library(ggfortify)
+library(ggResidpanel)
+library(MASS)
+library(forecast)
+library(tidyverse)
+library(lubridate)
+library(mtsdi)
+library("car")
+library(tseries)
+library(MTS)
+library(here)
+library(tsibble)
+library(feasts)
+library(fable)
+library(dplyr)
+library(timeDate)
+sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
+datadir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/6021_Project2/"
+
+setwd(sourcedir)
+
+source("SPM_Panel.R")
+source("PCAplots.R")
+source("FactorPlots.R")
+source("pc.glm.R")
+source("ROC.R")
+source("TestSet.R")
+
+
+```
+
+
+```{r, echo = FALSE}
 # Load data and impute missing values
-```{r cars}
 setwd(datadir)
 
 airquality = read.csv('AirQualityUCI.csv')
@@ -38,8 +78,537 @@ AQdata = airquality["NO2.GT."]
 AQdata = na_interpolation(AQdata)
 
 # aggregate to daily maxima for model building
-dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), FUN=max)
+dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")), 
+                     FUN=max) %>% as_tsibble(index = Group.1) %>%
+          dplyr::rename("Date" = "Group.1") %>% dplyr::rename("NO2" = "NO2.GT.")
 
 # create time series of NO2
 NO2.ts <- ts(dailyAQ[,2])
 ```
+
+# Exploratory Data Analysis
+## Inspecting for trends and seasonality
+```{r}
+# For quickly formatting plots
+my_theme <- theme(plot.title = element_text(hjust = 0.5, size = 16), 
+        axis.title = element_text(size = 12), 
+        axis.text = element_text(size = 12),
+        plot.caption = element_text(size = 12, hjust = 0))
+```
+
+```{r}
+dailyAQ %>% autoplot(NO2) + ylab("NO2 (mg/m^3)") + xlab("Date") + 
+  ggtitle("Nitrogen Concentration") + my_theme
+```
+
+The time series plot indicates potential seasonal components and a potential trend component.
+
+```{r}
+dailyAQ %>% gg_season(NO2, period = "week") + ylab("NO2 (mg/m^3)") + xlab("") + 
+    ggtitle("Nitrogen Concentration") + my_theme
+```
+
+This plot indicates an increasing trend over time.
+
+
+```{r}
+dailyAQ %>% model(STL(NO2 ~ trend(window=21) + season(window = "periodic"), robust = TRUE)) %>%
+  components() %>%autoplot() + my_theme + ylab("NO2 (mg/m^3)")
+```
+
+This seasonal decomposition chart shows a possibly increasing trend and a weekly seasonal component.
+
+
+```{r}
+NO2.ts <- head(NO2.ts, n = length(NO2.ts) - 8)
+
+pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
+
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)
+
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) %>% arrange(desc(spec))
+
+spec.NO2[c(1:17), ]
+```
+There is a peak at around 1.5 which corresponds to a seasonality component
+with a period of 1 week. There is also a possible monthly season and longer seasonal periods are also possible. We decided to model many combinations of these periods.
+  
+## Hypotheses from exploratory data analysis:
+
+There is an increasing trend in NO2 emissions. This could be due to increasing cars on the road over time. There is also one or more seasonal component.
+
+
+# Building Univariate Time Series Models
+```{r}
+# Creating potential predictors
+dailyAQ <- dailyAQ %>% mutate(step = 1:length(Date)) %>%
+      mutate(day = as.factor(as.character(lubridate::wday(Date, label  = TRUE)))) %>%
+      mutate(weekend = isWeekend(Date))
+
+# Create train and test sets
+dailyAQ_train <- dailyAQ %>% head(n = length(Date) - 8)
+dailyAQ_test <- dailyAQ %>% tail(n = 7)
+```
+
+
+## Modeling trend and season
+Deciding how to model the seasonal component was an iterative process. The models shown below include only those we considered to be reasonable candidates. Note that we decided to use the packages feasts, fable, and fabletools for these analyses so our code looks different than the the in class examples.
+
+```{r}
+# Create potential trend/season models
+models <- dailyAQ_train %>%
+  model(trend = TSLM(NO2 ~ trend()),
+        trnd_ssn_w_wkday_dummy = TSLM(NO2 ~ trend() + day),         
+        trnd_ssn_w_wknd_dummy = TSLM(NO2 ~ trend() + weekend),
+        trnd_ssn_wkly = TSLM(NO2 ~ trend() + sin(2*pi*step/7) + cos(2*pi*step/7)), 
+        trnd_ssn_wkly_mnthly = TSLM(NO2 ~ trend() + sin(2*pi*step/(365.25/12)) + cos(2*pi*step/(365.25/12))
+                                   + sin(2*pi*step/7) + cos(2*pi*step/7)),
+        trnd_ssn_complex_trig = TSLM(NO2 ~ trend() + sin(2*pi*step/192) +
+                                    cos(2*pi*step/192) + sin(2*pi*step/128) +
+                                    cos(2*pi*step/128) + sin(2*pi*step/76.8) +
+                                    cos(2*pi*step/76.8)+ sin(2*pi*step/64) +
+                                    cos(2*pi*step/64)+ sin(2*pi*step/7) +
+                                    cos(2*pi*step/7)+sin(2*pi*step/30) +
+                                    cos(2*pi*step/30)+sin(2*pi*step/365) +
+                                    cos(2*pi*step/365)),
+        trnd_ssn_complex_trig_and_dummy = TSLM(NO2 ~ trend() + weekend + 
+                                    sin(2*pi*step/192) + 
+                                    cos(2*pi*step/192) + sin(2*pi*step/128) + 
+                                    cos(2*pi*step/128) + sin(2*pi*step/76.8) +
+                                    cos(2*pi*step/76.8)+ sin(2*pi*step/64) +
+                                    cos(2*pi*step/64)+ sin(2*pi*step/7) +
+                                    cos(2*pi*step/7)+sin(2*pi*step/30) +
+                                    cos(2*pi*step/30)+sin(2*pi*step/365) +
+                                    cos(2*pi*step/365))
+        )
+
+```
+
+
+```{r}
+# Inspect the trend only model
+models %>% dplyr::select(trend) %>% report()
+```
+The coefficient on trend is significant, and plotting the modeled trend line 
+against the original data below seems to verify this. The significance of the trend will change when the seasonal components are modeled but it turns out to be significant in all cases.
+
+```{r}
+models %>% dplyr::select(trend) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend Model") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+Next, we inspected the reports and plots of the trend season models that used day-of-the-weekend and weekend/not weekend dummy variables.
+
+
+```{r}
+models %>% dplyr::select(trnd_ssn_w_wkday_dummy) %>% report()
+
+models %>% dplyr::select(trnd_ssn_w_wkday_dummy) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend-Season Model with Day-of-the-week Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+
+This model used a dummy variable for each day of the week. Friday is the base case.
+Only Saturday and Sunday were significantly different from the base case. NO2
+concentrations on these days are lower. Perhaps traffic is heavier during the
+weekdays because of commuters. It is also notable that the trend term is still
+significant once the seasonality component has been accounted for.
+
+The insignificance of the weekday variables led us to attempt to model the seasonal component with a single dummy variable 
+indicating whether the date was on a weekday or weekend.
+
+```{r}
+models %>% dplyr::select(trnd_ssn_w_wknd_dummy) %>% report()
+
+models %>% dplyr::select(trnd_ssn_w_wknd_dummy) %>% fitted() %>%
+  autoplot(color = 'red') + autolayer(dailyAQ_train) +
+        ggtitle("Trend-Season Model with Dummy Variables") + ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+All coefficients are significant indicating this is a strong candidate model.
+
+
+Next we inspected the model reports and plot of the trend season models that relied on trigonometric functions. We show this all in a single graph and table to save space. Note that the model 'trnd_ssn_complex_trig_and_dummy' does in fact have a dummy variable indicating whether a day is a weekend or not. The table showing coefficients and p-values are sorted from highest p-value to lowest p-value.
+
+
+```{r, fig.height=6, fig.width=8, fig.align='center'}
+models %>% dplyr::select(trnd_ssn_wkly, trnd_ssn_wkly_mnthly, 
+                         trnd_ssn_complex_trig,
+                         trnd_ssn_complex_trig_and_dummy) %>% coef() %>% arrange(desc(p.value))
+
+models %>% 
+  dplyr::select(trnd_ssn_wkly, trnd_ssn_wkly_mnthly, 
+                trnd_ssn_complex_trig, trnd_ssn_complex_trig_and_dummy) %>% 
+  fitted() %>% autoplot() +
+  autolayer(dailyAQ_train) + 
+  ggtitle("Trend-Season Model with Trigonometric Functions") + 
+  ylab("NO2 mg/m^3") + xlab("") + my_theme
+```
+
+Visually, the complex trig functions track the process very well though there are a few insignificant variables. Interestingly, the cosine function counterpart to the most insignificant variable of the trnd_ssn_complex_trig model (the sine function component of a 76.8 day season) has a p-value significant to the 0.001 level. This is not shown in the table but could easily be recreated from the attached .rmd.
+
+To decide which is the best approach, we compared performance metrics across
+the candidate models with a trend and seasonal component.
+
+```{r}
+
+models %>% 
+  dplyr::select(trnd_ssn_wkly, trnd_ssn_wkly_mnthly, trnd_ssn_complex_trig,
+                trnd_ssn_complex_trig_and_dummy,
+         trnd_ssn_w_wkday_dummy, trnd_ssn_w_wknd_dummy) %>% 
+  report() %>% dplyr::select(.model, adj_r_squared, AIC, BIC, df.residual)
+```
+The trend/season models with the complex trigonometric functions clearly outperformed the other models, but we decided to include other model candidates in case these are overfit. Since the only difference between the trnd_ssn_wkly and trnd_ssn_wkly_mnthly model is the inclusion of a monthly trigonometric function and the latter performed better, we decided to exclude the trnd_ssn_wkly model from the rest of our analysis.
+
+
+## Modeling the residuals of best trend/season models
+Next, we extracted and plotted the residuals of each candidate trend/season model to inspect for autoregressive properties.
+
+```{r, fig.height=6, fig.width=8, fig.align='center'}
+# Extract model residuals
+data_resids <- models %>%
+  dplyr::select(trnd_ssn_wkly_mnthly, trnd_ssn_w_wkday_dummy,
+                trnd_ssn_w_wknd_dummy, trnd_ssn_complex_trig,
+                trnd_ssn_complex_trig_and_dummy) %>% 
+  residuals()
+
+# Plot the residuals
+data_resids %>% autoplot(.resid) + ggtitle("Trend/Season Model Residuals") + 
+  xlab("") +  my_theme
+```
+
+There is clearly some autocorrelation in the residuals in all of the models because none of them look like random white noise. The next step was to inspect the ACF and PACF plots to decide how to model them. Because there are so many models, we look at the dummy variable models separate from the trigonometric models.
+
+```{r, fig.height=11, fig.width=8, fig.align='center'}
+plt_resid_ACF <- data_resids %>%
+  dplyr::filter(.model %in% c("trnd_ssn_w_wknd_dummy" ,"trnd_ssn_w_wkday_dummy")) %>%
+  ACF(.resid) %>% autoplot() + ggtitle("Dummies: NO2 Residuals ACF plot") + my_theme
+
+plt_resid_PACF <- data_resids %>%
+  dplyr::filter(.model %in% c("trnd_ssn_w_wknd_dummy" ,"trnd_ssn_w_wkday_dummy")) %>%
+  PACF(.resid) %>% autoplot() + ggtitle("Dummies: NO2 Residuals PACF plot") + my_theme
+
+ggarrange(plt_resid_ACF,plt_resid_PACF,nrow=2,ncol=1)
+```
+
+Both dummy variable trend/season models exhibit similar behavior in the ACF and PACF. 
+There is sinusoidal decay in the ACF of the residuals. The PACF could be
+interpreted as  cutting off after lag 2 or as exhibiting sinusoidal behavior. 
+This indicates that the residuals could be modeled as either AR(2) or as an
+ARMA process.
+
+
+```{r, fig.height=11, fig.width=8, fig.align='center'}
+ plt_resid_ACF <- data_resids %>%
+  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly" ,"trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>%
+  ACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals ACF plot") + my_theme
+
+plt_resid_PACF <- data_resids %>%
+  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly" ,"trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>%
+  PACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals PACF plot") + my_theme
+
+ggarrange(plt_resid_ACF,plt_resid_PACF,nrow=2,ncol=1)
+```
+
+The two trend/season models with more trigonometric functions (denoted 'complex') potentially show sinusoidal behavior in the ACF and the PACF and the PACF appears to cut off after 1 lag, although the second lag is technically barely above the significant threshold for the one that includes a weekend dummy variable. This indicates that it these should either be modeled as an AR(1) process or possibly an ARMA process if the PACF could be considered to be sinusoidal. The less complex trend/season model that only has monthly and weekly components looks more like the dummy variable models above with sinusoidal decay in the ACF and a PACF that either cuts off at lag 2, indicating AR(2), or a sinuisoidal PACF which would lead to modeling it as an ARMA process.
+
+Next we performed autoregressive modeling of the residuals according to these hypotheses. Because of the structure of the tibble package, we had to apply the AR(1) and AR(2) models to all residual datasets. We also deployed an auto-selection process.
+
+```{r}
+# Model the residuals
+models_residuals <- data_resids %>%
+  rename("model" = ".model", "resid" = ".resid") %>%
+  model(auto.arima = ARIMA(resid ~ PDQ(0,0,0)), 
+        ar2 = ARIMA(resid ~ pdq(2, 0, 0) + PDQ(0,0,0)),
+        ar1 = ARIMA(resid ~ pdq(1, 0, 0) + PDQ(0,0,0)))
+
+# Show the pdq values from the auto.arima models
+models_residuals %>% tidy() %>% filter(.model == 'auto.arima') %>% print(n = 3e3)
+```
+
+The auto-selection process yielded ARMA(2, 1) models for the day-of-the-week and weekend/not weekend dummy variable models as well as the weekly and monthly trigonometric models. The auto-selection process yielded an AR(1) model for the complex_trig models as we hypothesized based on the ACF and PACF.
+
+Next we report the AIC and BIC for each of the candidate residual models.
+
+```{r}
+# Compare AIC and BIC across the models; sort by AIC
+models_residuals %>% report() %>%
+  dplyr::select(model, .model, AIC, BIC) %>% arrange(AIC) %>% print(n = 100)
+
+```
+
+Based on AIC, the auto-selected ARIMA model performed best or tied for the best model for each set of residuals. BIC did not align exactly with AIC results. For both the dummy variable trend/season model residuals, the AR(2) model had the best score which was our hypothesis based on the AIC and BIC. The score improvement is likely negligable. For ease of visualization, we decided to continue with the rest of our analysis using only the auto-selected models.
+
+Next we plotted residuals versus fitted and QQ plots of model residuals to test for the iid assumption.
+
+```{r, fig.height=11, fig.width=8, fig.align='center'}
+# Choose the auto.arima model for the rest of the analysis
+models_residuals <- models_residuals %>% dplyr::select(-ar2, -ar1)
+
+# Plot residuals vs. fitted
+models_residuals_fitted <-
+  models_residuals %>% fitted() %>% as_tibble() %>% dplyr::select(Date, '.fitted')
+
+models_residuals_resid <- 
+  models_residuals %>% residuals() %>% as_tibble()
+
+model_residuals_fittedAndResiduals <- 
+  inner_join(models_residuals_resid, models_residuals_fitted, by = "Date")
+
+ggplot(model_residuals_fittedAndResiduals, aes(.fitted, .resid)) +
+    geom_point() + facet_grid(rows = vars(model), cols = vars(.model))
+```
+
+There is no clear trend in any of the model residuals.
+
+```{r, fig.height=11, fig.width=8, fig.align='center'}
+# Plot QQ plots
+ggplot(model_residuals_fittedAndResiduals, aes(sample = .resid)) +
+    stat_qq() + stat_qq_line(color = "red") + 
+    facet_grid(rows = vars(model), cols = vars(.model))
+```
+
+The residuals for each model all appear to exhibit similar patterns and are 
+approximately gaussian with some fat-tail behavior.
+
+The next step was to forecast and test each model against the test set.
+
+# Forecasting
+
+We started by forecasting the residuals.
+
+```{r, fig.height=11, fig.width=8, fig.align='center'}
+resid_summary <- models_residuals %>% augment()
+
+resid_7day_forecast <- models_residuals %>%
+  forecast(h = "1 week")
+
+plt_resid_forecast <- resid_7day_forecast %>% feasts::autoplot(alpha = 0.8) +
+  geom_line(data = resid_summary, aes(x = Date, y = resid)) + 
+  ggtitle("Forecast of residuals") + my_theme
+
+plt_resid_forecast
+
+resid_7day_forecast <- resid_7day_forecast %>% hilo(level = 95)
+
+```
+
+The forecast of residuals look reasonable and very similar as does the width of the confidence intervals. Next we forecasted the trend/season models.
+
+
+```{r, , fig.height=11, fig.width=8, fig.align='center'}
+main_summary <- models %>% select(trnd_ssn_w_wknd_dummy,
+                                  trnd_ssn_w_wkday_dummy,
+                                  trnd_ssn_complex_trig_and_dummy,
+                                  trnd_ssn_complex_trig,
+                                  trnd_ssn_wkly_mnthly) %>% augment()
+
+main_7day_forecast <- models %>% 
+  select(trnd_ssn_w_wknd_dummy, trnd_ssn_w_wkday_dummy, 
+         trnd_ssn_complex_trig_and_dummy, 
+         trnd_ssn_complex_trig, trnd_ssn_wkly_mnthly) %>%
+  forecast(new_data = dailyAQ_test)
+
+plt_main_forecast <- main_7day_forecast %>% feasts::autoplot(alpha = 0.8) +
+  geom_line(data = main_summary, aes(x = Date, y = NO2)) + 
+  ggtitle("Forecast of Trend-Season Model") + 
+  facet_grid(rows = vars(.model)) +
+  my_theme
+
+plt_main_forecast
+```
+The trend/season forecasts also look similar with similar confidence intervals. The next step was to combine these models to form the full forecast and to evaluate performance. We show the mean squared error for each model after the plot below.
+
+
+## Combining Season/trend and residuals forecasts and computing MSE
+```{r}
+full_model_summary <- resid_summary %>% 
+  left_join(main_summary,
+            by = c("Date" = "Date", "model" = ".model"),
+            suffix = c(".resid", ".full"))
+
+full_forecast <- left_join(resid_7day_forecast, main_7day_forecast,
+                           by = c("model" = ".model", "Date" = "Date"),
+                           suffix = c(".resid", ".full")) %>%
+                mutate(pt_pred = .mean.resid + .mean.full) 
+
+test_data <- dailyAQ_test %>%
+  dplyr::select(Date, "NO2") %>%
+  rename("NO2_Actual" = "NO2")
+
+full_forecast <- full_forecast %>% inner_join(test_data, by = ("Date" = "Date"))
+
+forecast_MSE <- full_forecast %>% as_tibble() %>% group_by(model, .model) %>%
+  mutate(sqrd_error = (pt_pred - NO2_Actual)^2) %>% summarize(MSE = mean(sqrd_error))
+
+```
+
+
+## Ploting forecasts and MSE
+```{r, fig.height=5.5, fig.width=10, fig.align='center'}
+full_forecast <- full_forecast %>% unpack_hilo(cols = "95%") %>%
+  mutate(`95%_upper` = .mean.full + `95%_upper`) %>%
+  mutate(`95%_lower` = .mean.full + `95%_lower`) %>% 
+  mutate(model_ID = paste(model, .model, sep = "_"))
+  
+plot_forecasts <- ggplot(data = full_forecast, aes(group = model_ID, color = model_ID)) + 
+  geom_line(aes(x=Date,y=NO2_Actual), color = "black") + 
+  geom_line(aes(x=Date,y=pt_pred)) + 
+  geom_line(aes(x=Date,y=`95%_lower`),linetype="dashed") + 
+  geom_line(aes(x=Date,y=`95%_upper`),linetype="dashed") +
+  xlab("") + ylab("NO2 mg/m^3") + 
+  ggtitle("NO2 Season/Trend Model + ARMA of Residuals with 95% CIs") + my_theme
+
+plot_forecasts
+
+forecast_MSE
+```
+
+Despite being significantly outperformed based on AIC, BIC, adjust R^2, and residuals, the model with the trigonometric functions representing weekly and monthly cycles performed best on the test dataset. That is the model we have selected. This indicates that the models with many trigonometric functions were overfitted.
+
+Next we used the best model to simulate the next year of data.
+
+# Simulation
+
+## Simulating one year proceeding our observations
+We started by forecasting the residuals.
+```{r}
+resid_1year_simulation <- models_residuals %>% dplyr::select(auto.arima) %>%
+  filter(model == "trnd_ssn_wkly_mnthly") %>%
+  forecast(h = "1 year") # %>% hilo(level = 95)
+
+resid_1year_simulation <- models_residuals %>% dplyr::select(auto.arima) %>%
+  filter(model == "trnd_ssn_wkly_mnthly") %>% generate(h = "1 year", seed = 1)
+```
+
+Next we forecasted the best trend/season model.
+```{r}
+vec_simulation_dates <- seq(ymd('2005-03-29'),ymd('2006-03-29'),by='days')
+
+original_steps <- length(dailyAQ_train$Date)
+sim_steps <- length(vec_simulation_dates)
+
+simulation_dates <- as_tibble() %>% as_tibble(.rows = length(vec_simulation_dates)) %>%
+  bind_cols(vec_simulation_dates) %>% rename('Date' = '...1') %>% 
+  mutate(NO2 = -999) %>%
+  mutate(step = (original_steps+1):(original_steps + sim_steps)) %>%
+  mutate(day = as.factor(as.character(lubridate::wday(Date, label  = TRUE)))) %>%
+  mutate(weekend = isWeekend(Date)) %>% as_tsibble(index = Date)
+
+
+main_1year_forecast <- models %>% 
+  select(trnd_ssn_wkly_mnthly) %>%
+  forecast(new_data = simulation_dates)
+
+```
+
+
+Finally, we combined them into a single simulation.
+```{r}
+full_simulation <- left_join(resid_1year_simulation, main_1year_forecast,
+                           by = c("model" = ".model", "Date" = "Date"),
+                           suffix = c(".resid", ".full")) %>%
+                mutate(pt_pred = .sim + .mean)  %>% 
+                mutate(model_ID = paste(model, .model, "_"))
+```
+
+
+
+```{r, fig.height=5.5, fig.width=10, fig.align='center'}
+
+dailyAQ_train <- dailyAQ_train %>% mutate(model_ID = "Training Data")
+
+plot_simulation <- ggplot(data = full_simulation, aes(group = model_ID, color = model_ID)) + 
+  geom_line(aes(x=Date,y=pt_pred)) + 
+  geom_line(data = dailyAQ_train, aes(x = Date, y = NO2)) +
+  xlab("") + ylab("NO2 mg/m^3") + 
+  ggtitle("NO2 Season/Trend Model + ARMA of Residuals with 95% CIs") + my_theme
+
+plot_simulation
+```
+
+The final simulation looks reasonable, so we are comfortable reporting this model as our final product. Next we compared the coefficient on the trend terms from the trend/season model built from the observations and a trend/season model built from the simulation.
+
+## Comparing trend/season models built from observations vs. simulation
+```{r}
+# Isolate the final trend/season model used for simulation
+models %>% dplyr::select(trnd_ssn_wkly_mnthly)
+
+# Create a trend/season model of the simulation
+simulation_model <- full_simulation %>% dplyr::select(-model, -.model, -.rep) %>%
+  model(sim_trnd_ssn_wkly_mnthly = TSLM(pt_pred ~ trend() + sin(2*pi*step/(365.25/12)) + cos(2*pi*step/(365.25/12))
+                                   + sin(2*pi*step/7) + cos(2*pi*step/7)))
+
+# Show the model coefficients and p-values
+models %>% dplyr::select(trnd_ssn_wkly_mnthly) %>% coef()
+simulation_model %>% coef()
+
+# Extract the trend coefficient
+main_coefs_trend <- models %>% dplyr::select(trnd_ssn_wkly_mnthly) %>% coef() %>% filter(term == "trend()") %>% pull(estimate)
+sim_coefs_trend <- simulation_model %>% coef() %>% filter(term == "trend()") %>% pull(estimate)
+
+
+# Calculate and report the percent difference between the trend coefficients of the model built from observed data and the model built from the simulation
+perc_dif <- (sim_coefs_trend - main_coefs_trend)/main_coefs_trend * 100
+
+perc_dif
+```
+
+The trend coefficient of the model built from the simulation is 0.53% higher than the trend coefficient of the model built from the observations. This is evidence that the simulation is sufficiently matching observed patterns.
+
+Next we inspected the periodogram to verify that the simulation reproduces the seasonal patterns of the observed data.
+
+## Verifying simulation reproduces seasonality
+```{r}
+NO2_sim.ts <- ts(full_simulation %>% as_tibble() %>% dplyr::select(pt_pred))
+
+pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
+
+pg.NO2_sim <- spec.pgram(NO2_sim.ts,spans=9,demean=T,log='no')
+
+```
+
+The periodograms built from the observed data and the simulation data look very similar which further verifies the simulation. Next we compared sample statistics for the observed data and the simulated data.
+
+```{r}
+obs_mean <- mean(dailyAQ_train$NO2)
+obs_var <- var(dailyAQ_train$NO2)
+
+sim_mean <- mean(full_simulation$pt_pred)
+sim_var <- var(full_simulation$pt_pred)
+
+obs_mean_percDiff <- (sim_mean - obs_mean)/obs_mean*100
+obs_var_percDiff <- (sim_var - obs_var)/obs_var*100
+
+obs_mean_percDiff
+obs_var_percDiff
+
+```
+The percent difference between the observed mean and simulated mean is 63.2% higher which is unsurprising since the simulation assumes the positive trend observed in the observations continues into the simulation period. The variance is 12.9% lower in the simulation which is indicative of a possible limitation of the simulation: it might not capture extremes well.
+
+Finally, to verify that the simulation captures the autocorrelation structure of the observations, we compared the ACF and PACF plots.
+
+## Verifying simulation reproduces autocorrelation structure
+```{r, fig.height=8, fig.width=8, fig.align='center'}
+# Create plots of observed data
+plt_NO2_obs_ACF <- dailyAQ_train %>%
+  ACF(NO2) %>% autoplot() + ggtitle("Observed NO2 ACF plot") + my_theme
+
+plt_NO2_obs_PACF <- dailyAQ_train %>%
+  PACF(NO2) %>% autoplot() + ggtitle("Observed NO2 PACF plot") + my_theme
+
+# Create plots of simulated data
+plt_NO2_sim_ACF <- full_simulation %>%
+  ACF(pt_pred) %>% autoplot() + ggtitle("Simulated NO2 ACF plot") + my_theme
+
+plt_NO2_sim_PACF <- full_simulation %>%
+  PACF(pt_pred) %>% autoplot() + ggtitle("Simulated NO2 PACF plot") + my_theme
+
+ggarrange(plt_NO2_obs_ACF,plt_NO2_obs_PACF, plt_NO2_sim_ACF, plt_NO2_sim_PACF,nrow=2,ncol=2)
+
+```
+
+The ACF plot of both the observed data and the simulated data exhibit sinusoidal decay with similar levels of significance. The PACF plots show a steep drop off after the 1st lag with a few significant spikes and posible sinusoidal behavior. The similarities of these plots also serves to verify our simulation model.
+
