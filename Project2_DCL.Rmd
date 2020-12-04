@@ -125,7 +125,8 @@ pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
 
 spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)
 
-spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) %>% arrange(desc(spec))
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) 
+  %>% arrange(desc(spec))
 
 spec.NO2[18, ]
 ```
@@ -302,12 +303,10 @@ ARMA process.
 
 ```{r, fig.height=11, fig.width=8, fig.align='center'}
  plt_resid_ACF <- data_resids %>%
-  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly" ,"trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>%
-  ACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals ACF plot") + my_theme
+  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly", "trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>% ACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals ACF plot") + my_theme
 
 plt_resid_PACF <- data_resids %>%
-  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly" ,"trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>%
-  PACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals PACF plot") + my_theme
+  dplyr::filter(.model %in% c("trnd_ssn_wkly_mnthly" ,"trnd_ssn_complex_trig", "trnd_ssn_complex_trig_and_dummy")) %>% PACF(.resid) %>% autoplot() + ggtitle("Trig Functions: NO2 Residuals PACF plot") + my_theme
 
 ggarrange(plt_resid_ACF,plt_resid_PACF,nrow=2,ncol=1)
 ```
