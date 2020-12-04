@@ -23,7 +23,7 @@ library(forecast)
 library(imputeTS)
 library(ggplot2)
 library(ggpubr)
-library(ggbiplot)
+#library(ggbiplot)
 # library(ggfortify)
 library(ggResidpanel)
 library(MASS)
@@ -40,8 +40,12 @@ library(feasts)
 library(fable)
 library(dplyr)
 library(timeDate)
-sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
-datadir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/6021_Project2/"
+#sourcedir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/Source"
+
+#datadir <- "C:/Users/Daniel/Dropbox/Self organization/Education/UVA/Graduate School/Coursework/Fall_2020/SYS 6021 Linear Statistical Models/6021_Project2/"
+
+sourcedir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Source"
+datadir <- "C:/Users/Rachael/OneDrive - University of Virginia/UVA/Fall_2020/SYS_6021/Project/6021_Project2/"
 
 setwd(sourcedir)
 
@@ -83,7 +87,11 @@ dailyAQ <- aggregate(AQdata, by=list(as.Date(airquality[,1],"%m/%d/%Y")),
           dplyr::rename("Date" = "Group.1") %>% dplyr::rename("NO2" = "NO2.GT.")
 
 # create time series of NO2
-NO2.ts <- ts(dailyAQ[,2])
+NO27.ts <- ts(dailyAQ[,2])
+
+# create time series of NO2 without final week
+dailyAQ.7 <- dailyAQ[1:384,]
+NO2.ts <- ts(dailyAQ.7[,2])
 ```
 
 # Exploratory Data Analysis
@@ -125,14 +133,25 @@ pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
 
 spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)
 
-spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) 
-  %>% arrange(desc(spec))
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) %>% arrange(desc(spec))
 
-spec.NO2[18, ]
+max.omega.no27<-pg.NO2$freq[which(pg.NO2$spec==max(pg.NO2$spec))]
+
+max.omega.no27
+
+# Looking at other peaks that we could try and consider in the model.
+sorted.spec <- sort(pg.NO2$spec, decreasing=T, index.return=T)
+names(sorted.spec)
+
+# Corresponding periods (omegas = frequences, Ts = periods)
+sorted.omegas <- pg.NO2$freq[sorted.spec$ix]
+sorted.Ts <- 1/pg.NO2$freq[sorted.spec$ix]
+
+# Looking at first 10
+sorted.Ts[1:10]
+
 ```
-There is a peak at around 1.5 which corresponds to a seasonality component
-with a period of 1 week.
-# Need help form Rachael here
+We examined the 10 most significant peaks from the periodogram and stored them in sorted.Ts. We can use these in building a model by going through and seeing if adding the next period would decrease the AIC.
   
 ## Hypotheses from exploratory data analysis:
 
@@ -297,8 +316,7 @@ ggarrange(plt_resid_ACF,plt_resid_PACF,nrow=2,ncol=1)
 Both dummy variable trend/season models exhibit similar behavior in the ACF and PACF. 
 There is sinusoidal decay in the ACF of the residuals. The PACF could be
 interpreted as  cutting off after lag 2 or as exhibiting sinusoidal behavior. 
-This indicates that the residuals could be modeled as either AR(2) or as an
-ARMA process.
+This indicates that the residuals could be modeled as either AR(2) or as an ARMA process.
 
 
 ```{r, fig.height=11, fig.width=8, fig.align='center'}
