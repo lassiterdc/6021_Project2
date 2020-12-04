@@ -126,11 +126,11 @@ pg.NO2 <- spec.pgram(NO2.ts,spans=9,demean=T,log='no')
 
 spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)
 
-spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec) %>% mutate(period = 1/freq) %>% arrange(desc(spec))
+spec.NO2 <- data.frame(freq=pg.NO2$freq, spec=pg.NO2$spec)%>%mutate(period = 1/freq) %>% arrange(desc(spec))
 
 spec.NO2[c(1:17), ]
 ```
-There is a peak at around 1.5 which corresponds to a seasonality component
+There is a peak at around .15 which corresponds to a seasonality component
 with a period of 1 week. There is also a possible monthly season and longer seasonal periods are also possible. We decided to model many combinations of these periods.
   
 ## Hypotheses from exploratory data analysis:
