@@ -155,7 +155,7 @@ We examined the 10 most significant peaks from the periodogram and stored them i
   
 ## Hypotheses from exploratory data analysis:
 
-There is an increasing trend in NO2 emissions. This could be due to increasing cars on the road over time. There is a weekly seasonal component. This could be a function of the number of cars on the road, and perhaps traffic is higher on the week days or weekends.
+There is an increasing trend in NO2 emissions. This could be due to increasing cars on the road over time. We also think that other components such as weekly, monthly, and yearly trends could play a part. This could be a function of the number of cars on the road, and perhaps traffic is higher on the week days or weekends.
 
 
 # Building Univariate Time Series Models
@@ -545,5 +545,70 @@ plot_simulation <- ggplot(data = full_simulation, aes(group = model_ID, color = 
 plot_simulation
 ```
 
-The final simulation looks reasonable, so we are comfortable reporting this model as our final product.
 
+# Different simulation here (change)
+```{r}
+# Next, look at periodogram
+ps <- spec.pgram(dailyAQ_train,spans=9,demean=T,log='no')
+
+pspec.no27 <- data.frame(freq=ps$freq, spec=ps$spec)
+ggplot(pspec.no27) + geom_line(aes(x=freq,y=spec)) + 
+  ggtitle("Smooth Periodogram of Predicted NO2 Concenctrations")
+```
+
+```{r}
+# Model the simulated data and see how the trend, seasonality, and residuals look.
+fmodel <- model(trend = TSLM(NO2 ~ trend()),
+        trnd_ssn_wkly = TSLM(NO2 ~ trend() + sin(2*pi*step/7) + cos(2*pi*step/7)))
+fmodel %>% dplyr::select(trend) %>% report()
+sim <- as.numeric(dailyAQ_train)
+
+simno27.ts <- lm(sim~next.yr.time+sin(2*pi*next.yr.time/192)
+                    +cos(2*pi*next.yr.time/192)+sin(2*pi*next.yr.time/128)
+                    +cos(2*pi*next.yr.time/128)+sin(2*pi*next.yr.time/76.8)
+                    +cos(2*pi*next.yr.time/76.8)+sin(2*pi*next.yr.time/64)
+                    +cos(2*pi*next.yr.time/64)+sin(2*pi*next.yr.time/64)
+                    +cos(2*pi*next.yr.time/64)+sin(2*pi*next.yr.time/7)
+                    +cos(2*pi*next.yr.time/7)+sin(2*pi*next.yr.time/30)
+                    +cos(2*pi*next.yr.time/30)+sin(2*pi*next.yr.time/365)
+                    +cos(2*pi*next.yr.time/365))
+
+summary(simno27.ts)     # Each has at least one significant trig term again.
+AIC(simno27.ts)     #3556.824
+
+no27.trend.seasonal$coefficients[2]
+simno27.ts$coefficients[2]
+
+# Look at the differences in the first coefficient (ignore intercept here)
+abs(no27.trend.seasonal$coefficients[2]-simno27.ts$coefficients[2])/no27.trend.seasonal$coefficients[2]     #1.018155 
+
+ggplot(sim.ts, aes(x=next.yr.time,y=sim)) + geom_line() +   geom_line(aes(x=next.yr.time,y=simno27.ts$fitted.values),color="red") + xlab("") + ylab("NO2")
+
+```
+
+```{r}
+# Use the functions ‘mean(ts)’ and ‘var(ts)’ where ts is a time series, and find the percent difference between observations and simulations.
+
+# Means
+a <- mean(dailyAQ_train$NO2)
+b <- mean(NO2.ts)
+abs(b-a)/b     #0
+
+# Variances
+c <- var(dailyAQ_train$NO2)
+d <- var(NO2.ts)
+abs(d-c)/d     #0
+
+```
+```{r}
+# Compare the ACF and PACF of the observations and simulations
+sim.res <- simno27.ts$residuals
+sim.res.ts <- ts(sim.res)
+
+sim.res.acf <- ggAcf(sim.res.ts)
+sim.res.pacf <- ggPacf(sim.res.ts)
+
+ggarrange(oacf, sim.res.acf, opacf, sim.res.pacf, nrow=2, ncol=2)
+
+# ACF looks very different, pacf looks more similar
+```
